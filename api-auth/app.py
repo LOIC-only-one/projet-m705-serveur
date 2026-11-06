@@ -1,16 +1,29 @@
 """api-auth : inscription, connexion, renouvellement et révocation des jetons."""
 
+## Comparatif avec django il s'agit d'un équivalent de views.py, mais pour Flask
+
 from apiflask import APIFlask, abort
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from flask import jsonify
-from flask_jwt_extended import (JWTManager,create_access_token,create_refresh_token,get_jti,get_jwt,get_jwt_identity,jwt_required,set_refresh_cookies,unset_refresh_cookies,)
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    create_refresh_token,
+    get_jti,
+    get_jwt,
+    get_jwt_identity,
+    jwt_required,
+    set_refresh_cookies,
+    unset_refresh_cookies,
+)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from errors import init_errors
 from models import RefreshToken, Utilisateur, db
 from schemas import LoginIn, RegisterIn, UserOut
 
@@ -27,34 +40,7 @@ jwt = JWTManager(app)
 limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
 ph = PasswordHasher()  # argon2id
 DUMMY_HASH = ph.hash("compte-inexistant")
-
-
-def error(status, code, message):
-    return {"error": {"code": code, "message": message}}, status
-
-
-@app.error_processor
-def format_error(e):
-    """Toutes les erreurs (validation, 404, 429, 500...) au format { "error": {code, message} }."""
-    body, status = error(
-        e.status_code,
-        e.extra_data.get("code", e.message.upper().replace(" ", "_")),
-        e.message,
-    )
-    if e.detail:
-        body["error"]["details"] = e.detail
-    return body, status, e.headers
-
-
-@jwt.unauthorized_loader
-@jwt.invalid_token_loader
-def jeton_invalide(reason):
-    return error(401, "JETON_INVALIDE", reason)
-
-
-@jwt.expired_token_loader
-def jeton_expire(_header, _payload):
-    return error(401, "JETON_EXPIRE", "Jeton de rafraîchissement expiré.")
+init_errors(app, jwt)
 
 
 def issue_tokens(user):
@@ -65,13 +51,13 @@ def issue_tokens(user):
     refresh = create_refresh_token(identity)
     db.session.add(RefreshToken(jti=get_jti(refresh), utilisateur_id=user.id))
     db.session.commit()
-    resp = jsonify(
+    reponse = jsonify(
         access_token=access,
         token_type="Bearer",
         expires_in=int(app.config["JWT_ACCESS_TOKEN_EXPIRES"].total_seconds()),
     )
-    set_refresh_cookies(resp, refresh)
-    return resp
+    set_refresh_cookies(reponse, refresh)
+    return reponse
 
 
 @app.get("/health")
@@ -89,7 +75,7 @@ def register(data):
         username=data["username"],
         email=data["email"].lower(),
         password_hash=ph.hash(data["password"]),
-        date_naissance=data["date_naissance"],
+        date_naissance=data["birthdate"],
     )
     db.session.add(user)
     try:

@@ -1,8 +1,9 @@
 """Configuration de l'application Flask, chargée par app.config.from_object("config")."""
 
+## Comparatif avec django il s'agit d'un équivalent de settings.py, mais pour Flask
+
 import os
 from datetime import timedelta
-
 from sqlalchemy import URL
 
 
@@ -20,8 +21,8 @@ SQLALCHEMY_DATABASE_URI = URL.create(
     port=int(os.environ.get("DB_PORT", "3306")),
     database=os.environ.get("DB_NAME", "videotheque"),
 )
-SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
-VALIDATION_ERROR_STATUS_CODE = 400
+SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True} # Permet de détecter les connexions mortes et de les remplacer par de nouvelles. Cela évite les erreurs "MySQL server has gone away" après un certain temps d'inactivité.
+VALIDATION_ERROR_STATUS_CODE = 400 # Permet de renvoyer un code 400 (Bad Request) au lieu de 422 (Unprocessable Entity) pour les erreurs de validation des entrées. Cela est plus conforme aux bonnes pratiques REST.
 
 # Jetons JWT signés en RS256 : la clé privée n'existe que dans api-auth
 JWT_ALGORITHM = "RS256"
