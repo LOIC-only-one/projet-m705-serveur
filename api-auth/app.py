@@ -19,19 +19,19 @@ from flask_jwt_extended import (
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from mongoengine import NotUniqueError, connect
+from mongoengine.connection import get_db
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from errors import init_errors
-from models import RefreshToken, Utilisateur, db_connexion
+from models import RefreshToken, Utilisateur
 from schemas import LoginIn, RegisterIn, UserOut
 
 #### Définition de ;l'application Flask
 app = APIFlask(__name__,title="api-auth",docs_path="/api/auth/docs",spec_path="/api/auth/openapi.json",)
 app.config.from_object("config")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
-db_connexion.init_app(app)
+connect(host=app.config["MONGODB_URI"])
 jwt = JWTManager(app)
 limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
 ph = PasswordHasher()  # argon2id
@@ -56,8 +56,7 @@ def issue_tokens(user):
     claims = {"role": user.role, "date_naissance": user.date_naissance.isoformat()}
     access = create_access_token(identity, additional_claims=claims)
     refresh = create_refresh_token(identity)
-    db_connexion.session.add(RefreshToken(jti=get_jti(refresh), utilisateur_id=user.id))
-    db_connexion.session.commit()
+    RefreshToken(jti=get_jti(refresh), utilisateur=user).save()
     reponse = jsonify(
         access_token=access,
         token_type="Bearer",
@@ -69,7 +68,7 @@ def issue_tokens(user):
 
 @app.get("/health")
 def health():
-    db_connexion.session.execute(text("SELECT 1"))
+    get_db().command("ping")
     return {"status": "ok"}
 
 
@@ -84,11 +83,9 @@ def register(data):
         password_hash=ph.hash(data["password"]),
         date_naissance=data["birthdate"],
     )
-    db_connexion.session.add(user)
     try:
-        db_connexion.session.commit()
-    except IntegrityError:
-        db_connexion.session.rollback()
+        user.save()
+    except NotUniqueError:  # index unique sur username et email
         abort(
             409,
             "Email ou nom d'utilisateur déjà utilisé.",
@@ -102,9 +99,7 @@ def register(data):
 @app.input(LoginIn, arg_name="data")
 def login(data):
     """Vérifie email et mot de passe, renvoie le jeton d'accès et pose le cookie de rafraîchissement."""
-    user = db_connexion.session.scalar(
-        db_connexion.select(Utilisateur).filter_by(email=data["email"].lower())
-    )
+    user = Utilisateur.objects(email=data["email"].lower()).first()
     try:
         ph.verify(user.password_hash if user else DUMMY_HASH, data["password"])
     except (VerificationError, InvalidHashError):
@@ -123,24 +118,21 @@ def login(data):
 def refresh():
     """Échange le cookie de rafraîchissement contre un nouveau couple de jetons (rotation)."""
     # Seule la requête qui supprime effectivement le jeton gagne, même en concurrence.
-    deleted = db_connexion.session.execute(
-        db_connexion.delete(RefreshToken).filter_by(jti=get_jwt()["jti"])
-    ).rowcount
+    deleted = RefreshToken.objects(jti=get_jwt()["jti"]).delete()
     if not deleted:
         abort(
             401,
             "Jeton de rafraîchissement révoqué.",
             extra_data={"code": "JETON_REVOQUE"},
         )
-    return issue_tokens(db_connexion.session.get(Utilisateur, int(get_jwt_identity())))
+    return issue_tokens(Utilisateur.objects.get(id=get_jwt_identity()))
 
 
 @app.post("/api/auth/logout")
 @jwt_required(refresh=True)
 def logout():
     """Révoque le jeton de rafraîchissement et efface le cookie."""
-    db_connexion.session.execute(db_connexion.delete(RefreshToken).filter_by(jti=get_jwt()["jti"]))
-    db_connexion.session.commit()
+    RefreshToken.objects(jti=get_jwt()["jti"]).delete()
     resp = app.response_class(status=204)
     unset_refresh_cookies(resp)
     return resp

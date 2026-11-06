@@ -1,20 +1,19 @@
-# Base MariaDB jetable pour les tests d'intégration : docker compose -f compose.test.yml up -d
+# Base MongoDB jetable pour les tests d'intégration : docker compose -f compose.test.yml up -d
 services:
   db-test:
-    image: mariadb:11.4
+    image: mongo:8.0
     environment:
-      MARIADB_ROOT_PASSWORD: root
-      MARIADB_DATABASE: videotheque
-      MARIADB_USER: auth
-      MARIADB_PASSWORD: test
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+      AUTH_DB_PASSWORD: test # lu par db/init/0_auth.js
     ports:
-      - "127.0.0.1:3307:3306"
+      - "127.0.0.1:27018:27017"
     volumes:
       - ./db/init:/docker-entrypoint-initdb.d:ro
     tmpfs:
-      - /var/lib/mysql
+      - /data/db
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD", "mongosh", "--quiet", "-u", "auth", "-p", "test", "--authenticationDatabase", "videotheque", "--eval", "db.adminCommand('ping')"]
       interval: 2s
       retries: 30
 

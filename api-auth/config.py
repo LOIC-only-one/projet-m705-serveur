@@ -4,7 +4,7 @@
 
 import os
 from datetime import timedelta
-from sqlalchemy import URL
+from urllib.parse import quote_plus
 
 
 def read_secret(name):
@@ -13,15 +13,14 @@ def read_secret(name):
         return f.read()
 
 
-SQLALCHEMY_DATABASE_URI = URL.create(
-    "mysql+pymysql",
-    username=os.environ.get("DB_USER", "auth"),
-    password=read_secret("DB_PASSWORD").strip(),
+# Connexion MongoDB : le compte "auth" est créé dans la base videotheque par db/init/0_auth.js
+MONGODB_URI = "mongodb://{user}:{password}@{host}:{port}/{db}".format(
+    user=os.environ.get("DB_USER", "auth"),
+    password=quote_plus(read_secret("DB_PASSWORD").strip()),  # quote_plus : un mot de passe avec @ ou : casserait l'URI
     host=os.environ.get("DB_HOST", "db"),
-    port=int(os.environ.get("DB_PORT", "3306")),
-    database=os.environ.get("DB_NAME", "videotheque"),
+    port=os.environ.get("DB_PORT", "27017"),
+    db=os.environ.get("DB_NAME", "videotheque"),
 )
-SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True} # Permet de détecter les connexions mortes et de les remplacer par de nouvelles. Cela évite les erreurs "MySQL server has gone away" après un certain temps d'inactivité.
 VALIDATION_ERROR_STATUS_CODE = 400 # Permet de renvoyer un code 400 (Bad Request) au lieu de 422 (Unprocessable Entity) pour les erreurs de validation des entrées. Cela est plus conforme aux bonnes pratiques REST.
 
 # Jetons JWT signés en RS256 : la clé privée n'existe que dans api-auth

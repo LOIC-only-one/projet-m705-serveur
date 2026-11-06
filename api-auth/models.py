@@ -1,19 +1,25 @@
-"""Tables utilisées par api-auth (schéma créé par db/init/0_auth.sql)."""
+"""Collections MongoDB utilisées par api-auth (index uniques créés par MongoEngine au premier accès)."""
 
 ## Comparatif avec django il s'agit d'un équivalent de models.py, mais pour Flask
 
-from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timezone
 
-db_connexion = SQLAlchemy()
-class Utilisateur(db_connexion.Model):
-    id = db_connexion.Column(db_connexion.Integer, primary_key=True)
-    username = db_connexion.Column(db_connexion.String(50), unique=True, nullable=False)
-    email = db_connexion.Column(db_connexion.String(255), unique=True, nullable=False)
-    password_hash = db_connexion.Column(db_connexion.String(255), nullable=False)
-    date_naissance = db_connexion.Column(db_connexion.Date, nullable=False)
-    role = db_connexion.Column(db_connexion.Enum("user", "admin"), nullable=False, default="user")
+from mongoengine import CASCADE, DateField, DateTimeField, Document, ReferenceField, StringField
 
-class RefreshToken(db_connexion.Model):
-    """Jetons de rafraîchissement encore valides : supprimer la ligne révoque le jeton."""
-    jti = db_connexion.Column(db_connexion.String(36), primary_key=True)
-    utilisateur_id = db_connexion.Column(db_connexion.ForeignKey("utilisateur.id", ondelete="CASCADE"), nullable=False)
+
+class Utilisateur(Document):
+    meta = {"collection": "utilisateur"}
+    username = StringField(required=True, unique=True, max_length=50)
+    email = StringField(required=True, unique=True, max_length=255)
+    password_hash = StringField(required=True)
+    date_naissance = DateField(required=True)
+    role = StringField(required=True, choices=("user", "admin"), default="user")
+    photo_profil = StringField()
+    created_at = DateTimeField(default=lambda: datetime.now(timezone.utc))
+
+
+class RefreshToken(Document):
+    """Jetons de rafraîchissement encore valides : supprimer le document révoque le jeton."""
+    meta = {"collection": "refresh_token"}
+    jti = StringField(primary_key=True)
+    utilisateur = ReferenceField(Utilisateur, required=True, reverse_delete_rule=CASCADE)

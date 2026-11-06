@@ -5,7 +5,7 @@
 
 from datetime import date
 from apiflask import Schema
-from apiflask.fields import Date, Email, Integer, String
+from apiflask.fields import Date, Email, String
 from apiflask.validators import Length, Regexp
 from marshmallow import EXCLUDE, ValidationError
 
@@ -29,7 +29,7 @@ class LoginIn(Schema):
 
 class UserOut(Schema):
     """Champs renvoyés pour un utilisateur : password_hash n'y est pas, il ne sort jamais."""
-    id = Integer()
+    id = String()
     username = String()
     email = String()
     role = String()

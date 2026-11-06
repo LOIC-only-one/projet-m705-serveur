@@ -21,7 +21,7 @@ def keys(tmp_path_factory):
     )
     (d / "db").write_text("test")
     os.environ.setdefault("DB_HOST", "127.0.0.1")
-    os.environ.setdefault("DB_PORT", "3307")
+    os.environ.setdefault("DB_PORT", "27018")
     os.environ["DB_PASSWORD_FILE"] = str(d / "db")
     os.environ["JWT_PRIVATE_KEY_FILE"] = str(d / "jwt")
     os.environ["JWT_PUBLIC_KEY_FILE"] = str(d / "jwt.pub")
@@ -31,13 +31,11 @@ def keys(tmp_path_factory):
 @pytest.fixture
 def client(keys):
     from app import app, limiter
-    from models import RefreshToken, Utilisateur, db
+    from models import RefreshToken, Utilisateur
 
     limiter.reset()
-    with app.app_context():
-        db.session.execute(db.delete(RefreshToken))
-        db.session.execute(db.delete(Utilisateur))
-        db.session.commit()
+    RefreshToken.objects.delete()
+    Utilisateur.objects.delete()
     # use_cookies=False : on passe le cookie à la main pour contrôler ce qui est envoyé.
     return app.test_client(use_cookies=False)
 
@@ -46,7 +44,7 @@ VALID = {
     "username": "dupont",
     "email": "a@b.fr",
     "password": "motdepasse-solide",
-    "date_naissance": "2010-05-14",
+    "birthdate": "2010-05-14",
 }
 
 
@@ -98,9 +96,9 @@ def test_register_doublon_409(client, override):
         {"email": "pas-un-mail"},
         {"username": "a"},
         {"username": None},
-        {"date_naissance": "2999-01-01"},
-        {"date_naissance": "14/05/2010"},
-        {"date_naissance": 2010},
+        {"birthdate": "2999-01-01"},
+        {"birthdate": "14/05/2010"},
+        {"birthdate": 2010},
     ],
 )
 def test_register_corps_invalide_400(client, override):
