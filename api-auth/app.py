@@ -1,276 +1,246 @@
 """api-auth : inscription, connexion, renouvellement et révocation des jetons."""
 
-import hashlib
 import os
-import re
-import secrets
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
-import jwt
-import pymysql
+from apiflask import APIFlask, Schema, abort
+from apiflask.fields import Date, Email, Integer, String
+from apiflask.validators import Length, Regexp
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from flask import Flask, g, jsonify, request
+from flask import jsonify
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    create_refresh_token,
+    get_jti,
+    get_jwt,
+    get_jwt_identity,
+    jwt_required,
+    set_refresh_cookies,
+    unset_refresh_cookies,
+)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from werkzeug.exceptions import HTTPException
+from flask_sqlalchemy import SQLAlchemy
+from marshmallow import EXCLUDE, ValidationError
+from sqlalchemy import URL, text
+from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-ACCESS_TTL = timedelta(minutes=15)
-REFRESH_TTL = timedelta(days=7)
-REFRESH_COOKIE = "refresh_token"
-USERNAME_RE = re.compile(r"[A-Za-z0-9_.-]{3,50}")
-EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
-ph = PasswordHasher()  # argon2id, paramètres par défaut d'argon2-cffi
+def read_secret(name):
+    """Lit un secret Docker (fichier dont le chemin est dans la variable <NAME>_FILE)."""
+    with open(os.environ[f"{name}_FILE"]) as f:
+        return f.read()
+
+
+app = APIFlask(
+    __name__,
+    title="api-auth",
+    docs_path="/api/auth/docs",
+    spec_path="/api/auth/openapi.json",
+)
+app.config.update(
+    SQLALCHEMY_DATABASE_URI=URL.create(
+        "mysql+pymysql",
+        username=os.environ.get("DB_USER", "auth"),
+        password=read_secret("DB_PASSWORD").strip(),
+        host=os.environ.get("DB_HOST", "db"),
+        port=int(os.environ.get("DB_PORT", "3306")),
+        database=os.environ.get("DB_NAME", "videotheque"),
+    ),
+    SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True},
+    VALIDATION_ERROR_STATUS_CODE=400,
+    JWT_ALGORITHM="RS256",
+    JWT_PRIVATE_KEY=read_secret("JWT_PRIVATE_KEY"),
+    JWT_PUBLIC_KEY=read_secret("JWT_PUBLIC_KEY"),
+    JWT_ACCESS_TOKEN_EXPIRES=timedelta(minutes=15),
+    JWT_REFRESH_TOKEN_EXPIRES=timedelta(days=7),
+    JWT_TOKEN_LOCATION=["cookies"],  # api-auth ne lit que le jeton de rafraîchissement
+    JWT_REFRESH_COOKIE_NAME="refresh_token",
+    JWT_REFRESH_COOKIE_PATH="/api/auth",
+    JWT_SESSION_COOKIE=False,
+    JWT_COOKIE_SECURE=True,
+    JWT_COOKIE_SAMESITE="Strict",
+    # SameSite=Strict et front servi sur la même origine : le double cookie anti-CSRF est inutile.
+    JWT_COOKIE_CSRF_PROTECT=False,
+)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # IP du client transmise par Caddy
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+# shortcut: compteur en mémoire propre à chaque worker ; passer à Redis si la limite doit être exacte.
+limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
+ph = PasswordHasher()  # argon2id
 # Hash factice : un email inconnu coûte le même temps qu'un mauvais mot de passe.
 DUMMY_HASH = ph.hash("compte-inexistant")
 
 
-class ApiError(Exception):
-    def __init__(self, status, code, message):
-        super().__init__(message)
-        self.status, self.code, self.message = status, code, message
+class Utilisateur(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    date_naissance = db.Column(db.Date, nullable=False)
+    role = db.Column(db.Enum("user", "admin"), nullable=False, default="user")
 
 
-def read_secret(name):
-    with open(os.environ[f"{name}_FILE"]) as f:
-        return f.read().strip()
+class RefreshToken(db.Model):
+    """Jetons de rafraîchissement encore valides : supprimer la ligne révoque le jeton."""
 
-
-def sha256(token):
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-def json_body():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        raise ApiError(400, "CORPS_INVALIDE", "Le corps doit être un objet JSON.")
-    return data
-
-
-def create_app(config=None):
-    app = Flask(__name__)
-    app.config.update(
-        DB_HOST=os.environ.get("DB_HOST", "db"),
-        DB_PORT=int(os.environ.get("DB_PORT", "3306")),
-        DB_NAME=os.environ.get("DB_NAME", "videotheque"),
-        DB_USER=os.environ.get("DB_USER", "auth"),
-        DB_PASSWORD=read_secret("DB_PASSWORD"),
-        JWT_PRIVATE_KEY=read_secret("JWT_PRIVATE_KEY"),
-        RATELIMIT_ENABLED=True,
-    )
-    app.config.update(config or {})
-    # Derrière Caddy : l'IP du client vient de X-Forwarded-For (un seul proxy de confiance).
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
-    # shortcut: compteur en mémoire, propre à chaque worker ; passer à Redis si la limite doit être exacte.
-    # Attaché à l'app car Flask-Limiter n'en garde qu'une référence faible.
-    app.limiter = limiter = Limiter(
-        get_remote_address, app=app, storage_uri="memory://"
+    jti = db.Column(db.String(36), primary_key=True)
+    utilisateur_id = db.Column(
+        db.ForeignKey("utilisateur.id", ondelete="CASCADE"), nullable=False
     )
 
-    def db():
-        if "db" not in g:
-            g.db = pymysql.connect(
-                host=app.config["DB_HOST"],
-                port=app.config["DB_PORT"],
-                user=app.config["DB_USER"],
-                password=app.config["DB_PASSWORD"],
-                database=app.config["DB_NAME"],
-                cursorclass=pymysql.cursors.DictCursor,
-            )
-        return g.db
 
-    @app.teardown_appcontext
-    def close_db(_exc):
-        conn = g.pop("db", None)
-        if conn is not None:
-            conn.close()
+def date_passee(d):
+    # marshmallow 4 : un validateur doit lever l'erreur, renvoyer False ne suffit plus.
+    if d >= date.today():
+        raise ValidationError("La date de naissance doit être dans le passé.")
 
-    def issue_tokens(cur, user):
-        """Signe le jeton d'accès, enregistre un jeton de rafraîchissement et valide la transaction."""
-        now = datetime.now(timezone.utc)
-        access = jwt.encode(
-            {
-                "sub": str(user["id"]),
-                "role": user["role"],
-                "date_naissance": user["date_naissance"].isoformat(),
-                "iat": now,
-                "exp": now + ACCESS_TTL,
-            },
-            app.config["JWT_PRIVATE_KEY"],
-            algorithm="RS256",
+
+class RegisterIn(Schema):
+    class Meta:
+        unknown = EXCLUDE  # un champ "role" envoyé par le client est ignoré
+
+    username = String(required=True, validate=Regexp(r"^[A-Za-z0-9_.-]{3,50}$"))
+    email = Email(required=True, validate=Length(max=255))
+    password = String(required=True, validate=Length(12, 1024))
+    date_naissance = Date(required=True, validate=date_passee)
+
+
+class LoginIn(Schema):
+    email = String(required=True)
+    password = String(required=True)
+
+
+class UserOut(Schema):
+    id = Integer()
+    username = String()
+    email = String()
+    role = String()
+
+
+def error(status, code, message):
+    return {"error": {"code": code, "message": message}}, status
+
+
+@app.error_processor
+def format_error(e):
+    """Toutes les erreurs (validation, 404, 429, 500...) au format { "error": {code, message} }."""
+    body, status = error(
+        e.status_code,
+        e.extra_data.get("code", e.message.upper().replace(" ", "_")),
+        e.message,
+    )
+    if e.detail:
+        body["error"]["details"] = e.detail
+    return body, status, e.headers
+
+
+@jwt.unauthorized_loader
+@jwt.invalid_token_loader
+def jeton_invalide(reason):
+    return error(401, "JETON_INVALIDE", reason)
+
+
+@jwt.expired_token_loader
+def jeton_expire(_header, _payload):
+    return error(401, "JETON_EXPIRE", "Jeton de rafraîchissement expiré.")
+
+
+def issue_tokens(user):
+    """Émet le jeton d'accès (corps) et le jeton de rafraîchissement (cookie HttpOnly)."""
+    identity = str(user.id)
+    claims = {"role": user.role, "date_naissance": user.date_naissance.isoformat()}
+    access = create_access_token(identity, additional_claims=claims)
+    refresh = create_refresh_token(identity)
+    db.session.add(RefreshToken(jti=get_jti(refresh), utilisateur_id=user.id))
+    db.session.commit()
+    resp = jsonify(
+        access_token=access,
+        token_type="Bearer",
+        expires_in=int(app.config["JWT_ACCESS_TOKEN_EXPIRES"].total_seconds()),
+    )
+    set_refresh_cookies(resp, refresh)
+    return resp
+
+
+@app.get("/health")
+def health():
+    db.session.execute(text("SELECT 1"))
+    return {"status": "ok"}
+
+
+@app.post("/api/auth/register")
+@app.input(RegisterIn, arg_name="data")
+@app.output(UserOut, status_code=201)
+def register(data):
+    """Crée un compte. Le rôle est toujours "user"."""
+    user = Utilisateur(
+        username=data["username"],
+        email=data["email"].lower(),
+        password_hash=ph.hash(data["password"]),
+        date_naissance=data["date_naissance"],
+    )
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        abort(
+            409,
+            "Email ou nom d'utilisateur déjà utilisé.",
+            extra_data={"code": "COMPTE_EXISTANT"},
         )
-        refresh = secrets.token_urlsafe(32)
-        cur.execute(
-            "DELETE FROM refresh_token WHERE utilisateur_id = %s AND expire_le < UTC_TIMESTAMP()",
-            (user["id"],),
+    return user
+
+
+@app.post("/api/auth/login")
+@limiter.limit("5 per minute")
+@app.input(LoginIn, arg_name="data")
+def login(data):
+    """Vérifie email et mot de passe, renvoie le jeton d'accès et pose le cookie de rafraîchissement."""
+    user = db.session.scalar(
+        db.select(Utilisateur).filter_by(email=data["email"].lower())
+    )
+    try:
+        ph.verify(user.password_hash if user else DUMMY_HASH, data["password"])
+    except (VerificationError, InvalidHashError):
+        user = None
+    if not user:
+        abort(
+            401,
+            "Email ou mot de passe incorrect.",
+            extra_data={"code": "IDENTIFIANTS_INVALIDES"},
         )
-        cur.execute(
-            "INSERT INTO refresh_token (utilisateur_id, token_hash, expire_le) VALUES (%s, %s, %s)",
-            (user["id"], sha256(refresh), (now + REFRESH_TTL).replace(tzinfo=None)),
+    return issue_tokens(user)
+
+
+@app.post("/api/auth/refresh")
+@jwt_required(refresh=True)
+def refresh():
+    """Échange le cookie de rafraîchissement contre un nouveau couple de jetons (rotation)."""
+    # Seule la requête qui supprime effectivement le jeton gagne, même en concurrence.
+    deleted = db.session.execute(
+        db.delete(RefreshToken).filter_by(jti=get_jwt()["jti"])
+    ).rowcount
+    if not deleted:
+        abort(
+            401,
+            "Jeton de rafraîchissement révoqué.",
+            extra_data={"code": "JETON_REVOQUE"},
         )
-        db().commit()
-        resp = jsonify(
-            access_token=access,
-            token_type="Bearer",
-            expires_in=int(ACCESS_TTL.total_seconds()),
-        )
-        resp.set_cookie(
-            REFRESH_COOKIE,
-            refresh,
-            max_age=REFRESH_TTL,
-            httponly=True,
-            secure=True,
-            samesite="Strict",
-            path="/api/auth",
-        )
-        return resp
+    return issue_tokens(db.session.get(Utilisateur, int(get_jwt_identity())))
 
-    @app.get("/health")
-    def health():
-        with db().cursor() as cur:
-            cur.execute("SELECT 1")
-        return {"status": "ok"}
 
-    @app.post("/api/auth/register")
-    def register():
-        data = json_body()
-        username, email = data.get("username"), data.get("email")
-        password, naissance = data.get("password"), data.get("date_naissance")
-        if not (isinstance(username, str) and USERNAME_RE.fullmatch(username)):
-            raise ApiError(
-                400, "USERNAME_INVALIDE", "3 à 50 caractères : lettres, chiffres, _ . -"
-            )
-        if not (
-            isinstance(email, str)
-            and len(email) <= 255
-            and EMAIL_RE.fullmatch(email.strip())
-        ):
-            raise ApiError(400, "EMAIL_INVALIDE", "Adresse mail invalide.")
-        if not (isinstance(password, str) and 12 <= len(password) <= 1024):
-            raise ApiError(
-                400,
-                "MOT_DE_PASSE_INVALIDE",
-                "Le mot de passe doit faire au moins 12 caractères.",
-            )
-        try:
-            naissance = date.fromisoformat(naissance)
-        except (TypeError, ValueError):
-            raise ApiError(
-                400, "DATE_INVALIDE", "date_naissance doit être au format AAAA-MM-JJ."
-            ) from None
-        if not date(1900, 1, 1) <= naissance < date.today():
-            raise ApiError(400, "DATE_INVALIDE", "date_naissance n'est pas plausible.")
-
-        email = email.strip().lower()
-        # Le rôle n'est jamais lu depuis le corps : toute inscription crée un "user".
-        with db().cursor() as cur:
-            try:
-                cur.execute(
-                    "INSERT INTO utilisateur (username, email, password_hash, date_naissance)"
-                    " VALUES (%s, %s, %s, %s)",
-                    (username, email, ph.hash(password), naissance),
-                )
-            except pymysql.err.IntegrityError:
-                db().rollback()
-                raise ApiError(
-                    409, "COMPTE_EXISTANT", "Email ou nom d'utilisateur déjà utilisé."
-                ) from None
-            db().commit()
-            user_id = cur.lastrowid
-        return {
-            "id": user_id,
-            "username": username,
-            "email": email,
-            "role": "user",
-        }, 201
-
-    @app.post("/api/auth/login")
-    @limiter.limit("5 per minute")
-    def login():
-        data = json_body()
-        email, password = data.get("email"), data.get("password")
-        if not (isinstance(email, str) and isinstance(password, str)):
-            raise ApiError(
-                400, "CHAMPS_MANQUANTS", "email et password sont obligatoires."
-            )
-        with db().cursor() as cur:
-            cur.execute(
-                "SELECT id, role, date_naissance, password_hash FROM utilisateur WHERE email = %s",
-                (email.strip().lower(),),
-            )
-            user = cur.fetchone()
-            try:
-                ph.verify(user["password_hash"] if user else DUMMY_HASH, password)
-            except (VerificationError, InvalidHashError):
-                user = None
-            if user is None:
-                raise ApiError(
-                    401, "IDENTIFIANTS_INVALIDES", "Email ou mot de passe incorrect."
-                )
-            return issue_tokens(cur, user)
-
-    @app.post("/api/auth/refresh")
-    def refresh():
-        token = request.cookies.get(REFRESH_COOKIE)
-        if not token:
-            raise ApiError(401, "JETON_ABSENT", "Jeton de rafraîchissement absent.")
-        with db().cursor() as cur:
-            # FOR UPDATE : deux refresh simultanés avec le même jeton ne peuvent pas réussir tous les deux.
-            cur.execute(
-                "SELECT rt.id AS rt_id, u.id, u.role, u.date_naissance"
-                " FROM refresh_token rt JOIN utilisateur u ON u.id = rt.utilisateur_id"
-                " WHERE rt.token_hash = %s AND rt.expire_le > UTC_TIMESTAMP() FOR UPDATE",
-                (sha256(token),),
-            )
-            row = cur.fetchone()
-            if row is None:
-                db().rollback()
-                raise ApiError(
-                    401,
-                    "JETON_INVALIDE",
-                    "Jeton de rafraîchissement invalide ou expiré.",
-                )
-            # Rotation : l'ancien jeton est supprimé, un nouveau est émis.
-            cur.execute("DELETE FROM refresh_token WHERE id = %s", (row["rt_id"],))
-            return issue_tokens(cur, row)
-
-    @app.post("/api/auth/logout")
-    def logout():
-        # La session, c'est le jeton de rafraîchissement : on n'exige pas un jeton d'accès encore valide.
-        token = request.cookies.get(REFRESH_COOKIE)
-        if token:
-            with db().cursor() as cur:
-                cur.execute(
-                    "DELETE FROM refresh_token WHERE token_hash = %s", (sha256(token),)
-                )
-            db().commit()
-        resp = app.response_class(status=204)
-        resp.delete_cookie(
-            REFRESH_COOKIE,
-            path="/api/auth",
-            secure=True,
-            httponly=True,
-            samesite="Strict",
-        )
-        return resp
-
-    @app.errorhandler(ApiError)
-    def api_error(e):
-        return jsonify(error={"code": e.code, "message": e.message}), e.status
-
-    @app.errorhandler(HTTPException)
-    def http_error(e):
-        return jsonify(
-            error={"code": e.name.upper().replace(" ", "_"), "message": e.description}
-        ), e.code
-
-    @app.errorhandler(Exception)
-    def server_error(e):
-        app.logger.exception("Erreur non gérée")
-        return jsonify(
-            error={"code": "ERREUR_INTERNE", "message": "Erreur interne du serveur."}
-        ), 500
-
-    return app
+@app.post("/api/auth/logout")
+@jwt_required(refresh=True)
+def logout():
+    """Révoque le jeton de rafraîchissement et efface le cookie."""
+    db.session.execute(db.delete(RefreshToken).filter_by(jti=get_jwt()["jti"]))
+    db.session.commit()
+    resp = app.response_class(status=204)
+    unset_refresh_cookies(resp)
+    return resp

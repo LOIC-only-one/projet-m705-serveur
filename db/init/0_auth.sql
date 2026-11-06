@@ -1,4 +1,3 @@
--- Tables utilisées par api-auth. Les tables du catalogue viendront avec api-catalogue.
 CREATE TABLE utilisateur (
     id             INT AUTO_INCREMENT PRIMARY KEY,
     username       VARCHAR(50)  NOT NULL UNIQUE,
@@ -10,11 +9,8 @@ CREATE TABLE utilisateur (
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- On stocke le SHA-256 du jeton de rafraîchissement, jamais le jeton lui-même.
 CREATE TABLE refresh_token (
-    id             INT AUTO_INCREMENT PRIMARY KEY,
+    jti            CHAR(36) PRIMARY KEY,
     utilisateur_id INT      NOT NULL,
-    token_hash     CHAR(64) NOT NULL UNIQUE,
-    expire_le      DATETIME NOT NULL,
     FOREIGN KEY (utilisateur_id) REFERENCES utilisateur (id) ON DELETE CASCADE
 );

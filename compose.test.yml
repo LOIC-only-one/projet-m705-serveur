@@ -17,3 +17,10 @@ services:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 2s
       retries: 30
+
+  # harbor:
+  # caddy:
+
+  #  auth_api:
+  #  runtime_api:
+  #  catalog_api:

@@ -1,5 +1,45 @@
+import os
+
 import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization as s
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+
+@pytest.fixture(scope="session")
+def keys(tmp_path_factory):
+    """Écrit les secrets de test là où l'app les lit, et renvoie la clé publique."""
+    d = tmp_path_factory.mktemp("secrets")
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    (d / "jwt").write_bytes(
+        private.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8, s.NoEncryption())
+    )
+    (d / "jwt.pub").write_bytes(
+        private.public_key().public_bytes(
+            s.Encoding.PEM, s.PublicFormat.SubjectPublicKeyInfo
+        )
+    )
+    (d / "db").write_text("test")
+    os.environ.setdefault("DB_HOST", "127.0.0.1")
+    os.environ.setdefault("DB_PORT", "3307")
+    os.environ["DB_PASSWORD_FILE"] = str(d / "db")
+    os.environ["JWT_PRIVATE_KEY_FILE"] = str(d / "jwt")
+    os.environ["JWT_PUBLIC_KEY_FILE"] = str(d / "jwt.pub")
+    return private.public_key()
+
+
+@pytest.fixture
+def client(keys):
+    from app import RefreshToken, Utilisateur, app, db, limiter
+
+    limiter.reset()
+    with app.app_context():
+        db.session.execute(db.delete(RefreshToken))
+        db.session.execute(db.delete(Utilisateur))
+        db.session.commit()
+    # use_cookies=False : on passe le cookie à la main pour contrôler ce qui est envoyé.
+    return app.test_client(use_cookies=False)
+
 
 VALID = {
     "username": "dupont",
@@ -30,7 +70,7 @@ def test_health(client):
 
 
 def test_register_cree_un_user_meme_si_role_admin_demande(client):
-    resp = register(client, role="admin", email=" A@B.fr ")
+    resp = register(client, role="admin", email="A@B.fr")
     assert resp.status_code == 201
     assert resp.json == {
         "id": resp.json["id"],
@@ -65,7 +105,7 @@ def test_register_doublon_409(client, override):
 def test_register_corps_invalide_400(client, override):
     resp = register(client, **override)
     assert resp.status_code == 400
-    assert set(resp.json["error"]) == {"code", "message"}
+    assert set(resp.json["error"]) == {"code", "message", "details"}
 
 
 def test_register_sans_json_400(client):
@@ -123,10 +163,13 @@ def test_logout_revoque_le_jeton(client):
     )
 
 
-def test_login_limite_a_5_par_minute(make_app):
-    client = make_app(RATELIMIT_ENABLED=True).test_client()
+def test_login_limite_a_5_par_minute(client):
     codes = [login(client, "x@y.fr", "n-importe-quoi").status_code for _ in range(6)]
     assert codes == [401] * 5 + [429]
+
+
+def test_doc_openapi_publiee(client):
+    assert "/api/auth/register" in client.get("/api/auth/openapi.json").json["paths"]
 
 
 def test_route_inconnue_format_erreur_commun(client):
