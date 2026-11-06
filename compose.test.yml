@@ -1,0 +1,19 @@
+# Base MariaDB jetable pour les tests d'intégration : docker compose -f compose.test.yml up -d
+services:
+  db-test:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: videotheque
+      MARIADB_USER: auth
+      MARIADB_PASSWORD: test
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      retries: 30
