@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+LABEL org.opencontainers.image.source=https://github.com/LOIC-only-one/api-auth
+
 WORKDIR /app
 
 COPY requirements.txt .
