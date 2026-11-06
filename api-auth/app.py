@@ -1,39 +1,18 @@
 """api-auth : inscription, connexion, renouvellement et révocation des jetons."""
 
-import os
-from datetime import date, timedelta
-
-from apiflask import APIFlask, Schema, abort
-from apiflask.fields import Date, Email, Integer, String
-from apiflask.validators import Length, Regexp
+from apiflask import APIFlask, abort
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from flask import jsonify
-from flask_jwt_extended import (
-    JWTManager,
-    create_access_token,
-    create_refresh_token,
-    get_jti,
-    get_jwt,
-    get_jwt_identity,
-    jwt_required,
-    set_refresh_cookies,
-    unset_refresh_cookies,
-)
+from flask_jwt_extended import (JWTManager,create_access_token,create_refresh_token,get_jti,get_jwt,get_jwt_identity,jwt_required,set_refresh_cookies,unset_refresh_cookies,)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_sqlalchemy import SQLAlchemy
-from marshmallow import EXCLUDE, ValidationError
-from sqlalchemy import URL, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-
-def read_secret(name):
-    """Lit un secret Docker (fichier dont le chemin est dans la variable <NAME>_FILE)."""
-    with open(os.environ[f"{name}_FILE"]) as f:
-        return f.read()
-
+from models import RefreshToken, Utilisateur, db
+from schemas import LoginIn, RegisterIn, UserOut
 
 app = APIFlask(
     __name__,
@@ -41,85 +20,13 @@ app = APIFlask(
     docs_path="/api/auth/docs",
     spec_path="/api/auth/openapi.json",
 )
-app.config.update(
-    SQLALCHEMY_DATABASE_URI=URL.create(
-        "mysql+pymysql",
-        username=os.environ.get("DB_USER", "auth"),
-        password=read_secret("DB_PASSWORD").strip(),
-        host=os.environ.get("DB_HOST", "db"),
-        port=int(os.environ.get("DB_PORT", "3306")),
-        database=os.environ.get("DB_NAME", "videotheque"),
-    ),
-    SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True},
-    VALIDATION_ERROR_STATUS_CODE=400,
-    JWT_ALGORITHM="RS256",
-    JWT_PRIVATE_KEY=read_secret("JWT_PRIVATE_KEY"),
-    JWT_PUBLIC_KEY=read_secret("JWT_PUBLIC_KEY"),
-    JWT_ACCESS_TOKEN_EXPIRES=timedelta(minutes=15),
-    JWT_REFRESH_TOKEN_EXPIRES=timedelta(days=7),
-    JWT_TOKEN_LOCATION=["cookies"],  # api-auth ne lit que le jeton de rafraîchissement
-    JWT_REFRESH_COOKIE_NAME="refresh_token",
-    JWT_REFRESH_COOKIE_PATH="/api/auth",
-    JWT_SESSION_COOKIE=False,
-    JWT_COOKIE_SECURE=True,
-    JWT_COOKIE_SAMESITE="Strict",
-    # SameSite=Strict et front servi sur la même origine : le double cookie anti-CSRF est inutile.
-    JWT_COOKIE_CSRF_PROTECT=False,
-)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # IP du client transmise par Caddy
-db = SQLAlchemy(app)
+app.config.from_object("config")
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+db.init_app(app)
 jwt = JWTManager(app)
-# shortcut: compteur en mémoire propre à chaque worker ; passer à Redis si la limite doit être exacte.
 limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
 ph = PasswordHasher()  # argon2id
-# Hash factice : un email inconnu coûte le même temps qu'un mauvais mot de passe.
 DUMMY_HASH = ph.hash("compte-inexistant")
-
-
-class Utilisateur(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
-    date_naissance = db.Column(db.Date, nullable=False)
-    role = db.Column(db.Enum("user", "admin"), nullable=False, default="user")
-
-
-class RefreshToken(db.Model):
-    """Jetons de rafraîchissement encore valides : supprimer la ligne révoque le jeton."""
-
-    jti = db.Column(db.String(36), primary_key=True)
-    utilisateur_id = db.Column(
-        db.ForeignKey("utilisateur.id", ondelete="CASCADE"), nullable=False
-    )
-
-
-def date_passee(d):
-    # marshmallow 4 : un validateur doit lever l'erreur, renvoyer False ne suffit plus.
-    if d >= date.today():
-        raise ValidationError("La date de naissance doit être dans le passé.")
-
-
-class RegisterIn(Schema):
-    class Meta:
-        unknown = EXCLUDE  # un champ "role" envoyé par le client est ignoré
-
-    username = String(required=True, validate=Regexp(r"^[A-Za-z0-9_.-]{3,50}$"))
-    email = Email(required=True, validate=Length(max=255))
-    password = String(required=True, validate=Length(12, 1024))
-    date_naissance = Date(required=True, validate=date_passee)
-
-
-class LoginIn(Schema):
-    email = String(required=True)
-    password = String(required=True)
-
-
-class UserOut(Schema):
-    id = Integer()
-    username = String()
-    email = String()
-    role = String()
 
 
 def error(status, code, message):

@@ -30,7 +30,8 @@ def keys(tmp_path_factory):
 
 @pytest.fixture
 def client(keys):
-    from app import RefreshToken, Utilisateur, app, db, limiter
+    from app import app, limiter
+    from models import RefreshToken, Utilisateur, db
 
     limiter.reset()
     with app.app_context():
