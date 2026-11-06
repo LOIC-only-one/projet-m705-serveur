@@ -1,7 +1,7 @@
 # Base MongoDB jetable pour les tests d'intégration : docker compose -f compose.test.yml up -d
 services:
   db-test:
-    image: mongo:8.0
+    image: mongo:8.2
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: root
