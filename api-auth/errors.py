@@ -8,7 +8,7 @@ def error(status, code, message):
 
 def format_error(error_response):
     """Erreurs APIFlask : validation, abort(), 404, 405, 429, 500..."""
-    body, status = error(error_response.status_code, error_response.extra_data.get("code", error_response.message.upper()), error_response.message,)
+    body, status = error(error_response.status_code, error_response.extra_data.get("code", error_response.message.upper().replace(" ", "_")), error_response.message,)
     if error_response.detail:
         body["error"]["details"] = error_response.detail
     return body, status, error_response.headers

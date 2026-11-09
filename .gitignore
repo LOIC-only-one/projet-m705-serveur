@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Secrets locaux (générés par secrets/generer.sh)
+secrets/*
+!secrets/generer.sh

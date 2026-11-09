@@ -7,44 +7,43 @@
     header {
         # Active HSTS (force HTTPS pendant 1 an, sous-domaines inclus)
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        
+
         # Empêche l'encapsulation dans des iframes (protection contre le clickjacking)
         X-Frame-Options "DENY"
-        
+
         # Bloque le sniffing du type MIME
         X-Content-Type-Options "nosniff"
-        
+
         # Contrôle la fuite du Referer
         Referrer-Policy "strict-origin-when-cross-origin"
-        
+
         # Empêche le navigateur d'activer des fonctionnalités matérielles inutiles
         Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
-        
+
         # Cache la version du serveur web
         -Server
     }
 }
 
-:80, :443 {
-    abort
-}
-
-/api/auth/* {
+# Adresse du site : :8080 (HTTP) par défaut pour les tests, le domaine en production (HTTPS automatique)
+{$SITE_ADDRESS::8080} {
     import security_headers
-    reverse_proxy api-auth:8000
-}
 
-/api/users/* {
-    import security_headers
-    reverse_proxy api-user:8000
-}
+    # Le * couvre aussi /api/users?page=... et /api/users/42
+    handle /api/auth/* {
+        reverse_proxy api-auth:8000
+    }
 
-/api/films, /api/exemplaires, /api/emprunts, /api/genres, /api/tmdb {
-    import security_headers
-    reverse_proxy api-catalog:8000
-}
+    handle /api/users* {
+        reverse_proxy api-user:8000
+    }
 
-/* {
-    import security_headers
-    reverse_proxy front-static:8000
+    @catalogue path /api/films* /api/exemplaires* /api/emprunts* /api/genres* /api/tmdb*
+    handle @catalogue {
+        reverse_proxy api-catalogue:8000
+    }
+
+    handle {
+        reverse_proxy front-static:8000
+    }
 }

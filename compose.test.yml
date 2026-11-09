@@ -1,4 +1,8 @@
-# Base MongoDB jetable pour les tests d'intégration : docker compose -f compose.test.yml up -d
+# Pile de test : MongoDB jetable + api-auth + Caddy.
+#   Clés et mot de passe de test (une seule fois) : ./secrets/generer.sh
+#   Base seule (pour pytest)  : docker compose -f compose.test.yml up -d db-test
+#   Pile complète             : docker compose -f compose.test.yml up -d --build
+#   puis http://localhost:8080/api/auth/docs
 services:
   db-test:
     image: mongo:8.2
@@ -17,9 +21,51 @@ services:
       interval: 2s
       retries: 30
 
-  # harbor:
-  # caddy:
+  api-auth:
+    build: ./api-auth
+    environment:
+      DB_HOST: db-test
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+    secrets:
+      - db_password
+      - jwt_private_key
+      - jwt_public_key
+    depends_on:
+      db-test:
+        condition: service_healthy
 
-  #  auth_api:
-  #  runtime_api:
-  #  catalog_api:
+  front-index:
+    build: ../project-m705-client/front-index
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api-auth
+
+
+  caddy:
+    image: caddy:2.8.4
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api-auth
+      - front-index
+
+  # api-user:
+  # api-catalogue:
+
+secrets:
+  db_password:
+    file: ./secrets/db_password
+  jwt_private_key:
+    file: ./secrets/jwt_private_key.pem
+  jwt_public_key:
+    file: ./secrets/jwt_public_key.pem
+
+networks:
+  default:
+    name: projet-m705-serveur_default
+

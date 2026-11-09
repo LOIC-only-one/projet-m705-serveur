@@ -1,6 +1,7 @@
 """Collections MongoDB utilisées par api-auth (index uniques créés par MongoEngine au premier accès)."""
 
 ## Comparatif avec django il s'agit d'un équivalent de models.py, mais pour Flask
+## Permet de définir les champs, types et contraintes des documents stockés dans MongoDB, ainsi que les relations entre eux.
 
 from datetime import datetime, timezone
 
