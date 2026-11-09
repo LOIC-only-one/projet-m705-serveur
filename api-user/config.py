@@ -21,3 +21,10 @@ MONGODB_URI = "mongodb://{user}:{password}@{host}:{port}/{db}".format(
     db=os.environ.get("DB_NAME", "videotheque"),
 )
 VALIDATION_ERROR_STATUS_CODE = 400 # Permet de renvoyer un code 400 (Bad Request) au lieu de 422 (Unprocessable Entity) pour les erreurs de validation des entrées. Cela est plus conforme aux bonnes pratiques REST.
+
+# Jetons d'accès signés en RS256 par api-auth : api-user ne les vérifie qu'avec la clé publique
+JWT_ALGORITHM = "RS256"
+JWT_PUBLIC_KEY = read_secret("JWT_PUBLIC_KEY")
+
+# Jeton d'accès envoyé dans l'en-tête "Authorization: Bearer <jeton>"
+JWT_TOKEN_LOCATION = ["headers"]

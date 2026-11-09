@@ -18,6 +18,7 @@ class Utilisateur(Document):
     photo_profil = StringField()
     created_at = DateTimeField(default=lambda: datetime.now(timezone.utc))
 
+
 class RefreshToken(Document):
     """Jetons de rafraîchissement encore valides : supprimer le document révoque le jeton."""
     meta = {"collection": "refresh_token"}

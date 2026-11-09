@@ -1,38 +1,25 @@
-"""api-user : Gestion des comptes, administration"""
+"""api-user : consultation, modification et suppression des comptes."""
 
 ## Comparatif avec django il s'agit d'un équivalent de views.py, mais pour Flask
 
 from apiflask import APIFlask, abort
-from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerificationError
-from flask import jsonify
-from flask_jwt_extended import (
-    JWTManager,
-    verify_jwt_in_request,
-    get_jti,
-    get_jwt,
-    get_jwt_identity,
-    jwt_required
-)
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from bson import ObjectId
+from flask_jwt_extended import JWTManager, get_jwt, get_jwt_identity, jwt_required
 from mongoengine import NotUniqueError, connect
 from mongoengine.connection import get_db
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-#from errors import init_errors
-from models import Utilisateur, RefreshToken
-from schemas import UserOut, UserIdsout, UserPatchIn
+from errors import init_errors
+from models import RefreshToken, Utilisateur
+from schemas import UserIdsOut, UserOut, UserPatchIn
 
 #### Définition de l'application Flask
-app = APIFlask(__name__,title="api-auth",docs_path="/api/auth/docs",spec_path="/api/auth/openapi.json",)
+app = APIFlask(__name__, title="api-user", docs_path="/api/users/docs", spec_path="/api/users/openapi.json",)
 app.config.from_object("config")
+app.security_schemes = {"BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 connect(host=app.config["MONGODB_URI"])
 jwt = JWTManager(app)
-limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
-ph = PasswordHasher()  # argon2id
-DUMMY_HASH = ph.hash("compte-inexistant")
 init_errors(app, jwt)
 #### Fin de la définition de l'application Flask
 
@@ -40,92 +27,99 @@ init_errors(app, jwt)
 #### Fonctions utilitaires
 """
 Endpoints :
-@app.get("/users") : Renvoie tous les ID des utilisateurs
-@app.get("/users/{id}") : Renvoie tous les champs d'un user spécifique
-@app.patch("/users/{id}") : Modifie certains éléments d'un user
-@app.delete("/users/{id}") : Supprime un user.
+@app.get("/health") : vérifie que la base de données est prête.
+@app.get("/api/users") : renvoie tous les ID des utilisateurs (admin).
+@app.get("/api/users/<id>") : renvoie tous les champs d'un utilisateur (admin ou propriétaire).
+@app.patch("/api/users/<id>") : modifie certains champs d'un utilisateur (admin ou propriétaire).
+@app.delete("/api/users/<id>") : supprime un utilisateur et révoque ses jetons (admin ou propriétaire).
 """
 
-def checkAuthToken():
-    """Vérifie que le refresh token du cookie existe en base. Retourne le document ou None."""
-    try:
-        verify_jwt_in_request(refresh=True)  # signature + expiration + type "refresh"
-    except Exception:
-        return None
-    return RefreshToken.objects(
-        jti=get_jwt()["jti"],
-        utilisateur=ObjectId(get_jwt_identity()),
-    ).first()
-
-
-def isAdmin():
+def est_admin():
+    """Le rôle est lu dans le jeton d'accès, émis par api-auth."""
     return get_jwt().get("role") == "admin"
 
 
-def accessVerified(id):
-    """Autorise l'admin ou le propriétaire du compte."""
-    if not (isAdmin() or get_jwt_identity() == id):
-        abort(403, "Accès refusé")
+def verifier_acces(id):
+    """Autorise l'admin ou le propriétaire du compte (l'identité du jeton est str(user.id))."""
+    if not (est_admin() or get_jwt_identity() == id):
+        abort(403, "Accès refusé.", extra_data={"code": "ACCES_REFUSE"})
 
 
-def findUser(id):
-    if not ObjectId.is_valid(id):
-        abort(404, "Utilisateur introuvable")
-    user = Utilisateur.objects(id=id).first()
+def trouver_user(id):
+    """Renvoie l'utilisateur, ou 404 si l'id est mal formé ou inconnu."""
+    user = Utilisateur.objects(id=id).first() if ObjectId.is_valid(id) else None
     if user is None:
-        abort(404, "Utilisateur introuvable")
+        abort(404, "Utilisateur introuvable.", extra_data={"code": "UTILISATEUR_INTROUVABLE"})
     return user
 
 
-#### Endpoints
-@app.get("/users")
+@app.get("/health")
+def health():
+    get_db().command("ping")
+    return {"status": "ok"}
+
+
+@app.get("/api/users")
+@jwt_required()  # sous la route et avant la validation : l'authentification passe en premier
 @app.output(UserIdsOut)
-@jwt_required()
-def listUser():
+@app.doc(security="BearerAuth")
+def lister_users():
     """Renvoie tous les ID des utilisateurs (admin uniquement)."""
-    if not isAdmin():
-        abort(403, "Accès refusé")
+    if not est_admin():
+        abort(403, "Accès refusé.", extra_data={"code": "ACCES_REFUSE"})
     return {"ids": [str(u.id) for u in Utilisateur.objects.only("id")]}
 
 
-@app.get("/users/<id>")
-@app.output(UserOut)
+@app.get("/api/users/<id>")
 @jwt_required()
+@app.output(UserOut)
+@app.doc(security="BearerAuth")
 def obtenir_user(id):
     """Renvoie tous les champs d'un utilisateur."""
-    accessVerified(id)
-    return findUser(id)
+    verifier_acces(id)
+    return trouver_user(id)
 
 
-@app.patch("/users/<id>")
-@app.input(UserPatchIn(partial=True), location="json")
-@app.output(UserOut)
+@app.patch("/api/users/<id>")
 @jwt_required()
-def modifier_user(id, json_data):
-    """Modifie certains champs d'un utilisateur."""
-    accessVerified(id)
-    if not json_data:
-        abort(400, "Aucun champ à modifier")
-    if "role" in json_data and not isAdmin():
-        abort(403, "Seul un admin peut modifier le rôle")
+@app.input(UserPatchIn(partial=True), arg_name="data")
+@app.output(UserOut)
+@app.doc(security="BearerAuth")
+def modifier_user(id, data):
+    """Modifie certains champs d'un utilisateur. Seul un admin peut changer le rôle."""
+    verifier_acces(id)
+    if not data:
+        abort(400, "Aucun champ à modifier.", extra_data={"code": "CORPS_VIDE"})
+    if "role" in data and not est_admin():
+        abort(403, "Seul un admin peut modifier le rôle.", extra_data={"code": "ACCES_REFUSE"})
 
-    user = findUser(id)
-    for champ, valeur in json_data.items():
+    user = trouver_user(id)
+    if "email" in data:
+        data["email"] = data["email"].lower()  # comme à l'inscription
+    if "birthdate" in data:
+        data["date_naissance"] = data.pop("birthdate")
+    for champ, valeur in data.items():
         setattr(user, champ, valeur)
     try:
         user.save()
-    except NotUniqueError:
-        abort(409, "Nom d'utilisateur ou email déjà utilisé")
+    except NotUniqueError:  # index unique sur username et email
+        abort(
+            409,
+            "Email ou nom d'utilisateur déjà utilisé.",
+            extra_data={"code": "COMPTE_EXISTANT"},
+        )
     return user
 
 
-@app.delete("/users/<id>")
-@app.output({}, status_code=204)
+@app.delete("/api/users/<id>")
 @jwt_required()
+@app.output({}, status_code=204)
+@app.doc(security="BearerAuth")
 def supprimer_user(id):
-    """Supprime un utilisateur et révoque ses refresh tokens."""
-    accessVerified(id)
-    user = findUser(id)
+    """Supprime un utilisateur et révoque ses jetons de rafraîchissement."""
+    verifier_acces(id)
+    user = trouver_user(id)
     RefreshToken.objects(utilisateur=user).delete()
     user.delete()
     return ""
+### Fin des définitions des routes de l'API
