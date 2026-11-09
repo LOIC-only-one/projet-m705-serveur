@@ -62,13 +62,13 @@ def isAdmin():
     return get_jwt().get("role") == "admin"
 
 
-def verifier_acces(id):
+def accessVerified(id):
     """Autorise l'admin ou le propriétaire du compte."""
     if not (isAdmin() or get_jwt_identity() == id):
         abort(403, "Accès refusé")
 
 
-def trouver_user(id):
+def findUser(id):
     if not ObjectId.is_valid(id):
         abort(404, "Utilisateur introuvable")
     user = Utilisateur.objects(id=id).first()
@@ -76,3 +76,56 @@ def trouver_user(id):
         abort(404, "Utilisateur introuvable")
     return user
 
+
+#### Endpoints
+@app.get("/users")
+@app.output(UserIdsOut)
+@jwt_required()
+def listUser():
+    """Renvoie tous les ID des utilisateurs (admin uniquement)."""
+    if not isAdmin():
+        abort(403, "Accès refusé")
+    return {"ids": [str(u.id) for u in Utilisateur.objects.only("id")]}
+
+
+@app.get("/users/<id>")
+@app.output(UserOut)
+@jwt_required()
+def obtenir_user(id):
+    """Renvoie tous les champs d'un utilisateur."""
+    accessVerified(id)
+    return findUser(id)
+
+
+@app.patch("/users/<id>")
+@app.input(UserPatchIn(partial=True), location="json")
+@app.output(UserOut)
+@jwt_required()
+def modifier_user(id, json_data):
+    """Modifie certains champs d'un utilisateur."""
+    accessVerified(id)
+    if not json_data:
+        abort(400, "Aucun champ à modifier")
+    if "role" in json_data and not isAdmin():
+        abort(403, "Seul un admin peut modifier le rôle")
+
+    user = findUser(id)
+    for champ, valeur in json_data.items():
+        setattr(user, champ, valeur)
+    try:
+        user.save()
+    except NotUniqueError:
+        abort(409, "Nom d'utilisateur ou email déjà utilisé")
+    return user
+
+
+@app.delete("/users/<id>")
+@app.output({}, status_code=204)
+@jwt_required()
+def supprimer_user(id):
+    """Supprime un utilisateur et révoque ses refresh tokens."""
+    accessVerified(id)
+    user = findUser(id)
+    RefreshToken.objects(utilisateur=user).delete()
+    user.delete()
+    return ""
