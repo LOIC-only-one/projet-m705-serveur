@@ -147,6 +147,16 @@ def test_patch_role_reserve_aux_admins(client, auth):
     assert resp.json["role"] == "admin"
 
 
+def test_patch_role_inchange_accepte_pour_un_user(client, auth):
+    user = make_user()
+    resp = client.patch(
+        f"/api/users/{user.id}", headers=auth(user), json={"role": "user", "username": "nouveau"}
+    )
+    assert resp.status_code == 200
+    assert resp.json["role"] == "user"
+    assert resp.json["username"] == "nouveau"
+
+
 @pytest.mark.parametrize(
     "body",
     [{}, {"password_hash": "x"}, {"username": "a"}, {"birthdate": "2999-01-01"}, {"email": "pas-un-mail"}],
