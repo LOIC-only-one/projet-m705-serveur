@@ -38,7 +38,7 @@ def est_admin():
     """Le rôle est lu dans le jeton d'accès, émis par api-auth."""
     return get_jwt().get("role") == "admin"
 
-
+@jwt_required()
 def verifier_acces(id):
     """Autorise l'admin ou le propriétaire du compte (l'identité du jeton est str(user.id))."""
     if not (est_admin() or get_jwt_identity() == id):
