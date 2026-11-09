@@ -37,9 +37,9 @@ services:
         condition: service_healthy
 
   front-index:
-    build: ../project-m705-client/front-index
+    build: ../projet-m705-client/front-index/
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3000:8000"
     depends_on:
       - api-auth
 
