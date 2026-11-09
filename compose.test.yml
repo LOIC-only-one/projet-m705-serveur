@@ -79,6 +79,7 @@ services:
       db-test:
         condition: service_healthy
       api-auth:
+        condition: service_started
 
 secrets:
   db_password:
