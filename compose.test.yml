@@ -94,7 +94,7 @@ secrets:
   jwt_public_key:
     file: ./secrets/jwt_public_key.pem
   tmdb_api_key:
-    file: ./secrets/tmdb_api_key
+    file: ./secrets/api-key.txt
 
 networks:
   default:
