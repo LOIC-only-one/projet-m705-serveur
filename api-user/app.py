@@ -90,10 +90,11 @@ def modifier_user(id, data):
     verifier_acces(id)
     if not data:
         abort(400, "Aucun champ à modifier.", extra_data={"code": "CORPS_VIDE"})
-    if "role" in data and not est_admin():
-        abort(403, "Seul un admin peut modifier le rôle.", extra_data={"code": "ACCES_REFUSE"})
 
     user = trouver_user(id)
+    # Un non-admin peut renvoyer son rôle actuel (Swagger envoie tous les champs), pas le changer.
+    if "role" in data and data["role"] != user.role and not est_admin():
+        abort(403, "Seul un admin peut modifier le rôle.", extra_data={"code": "ACCES_REFUSE"})
     if "email" in data:
         data["email"] = data["email"].lower()  # comme à l'inscription
     if "birthdate" in data:
