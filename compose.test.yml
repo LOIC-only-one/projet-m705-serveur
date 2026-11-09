@@ -55,6 +55,8 @@ services:
       - api-auth
       - front-index
       - api-catalogue
+      - api-user
+
   api-catalogue:
     build: ./api-catalogue
     environment:
@@ -66,7 +68,17 @@ services:
       db-test:
         condition: service_healthy
 
-  # api-user:
+  api-user:
+    build: ./api-user
+    environment:
+      DB_HOST: db-test
+      DB_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    depends_on:
+      db-test:
+        condition: service_healthy
+      api-auth:
 
 secrets:
   db_password:
