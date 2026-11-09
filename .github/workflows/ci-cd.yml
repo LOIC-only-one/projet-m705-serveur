@@ -12,6 +12,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    matrix:
+      api: [api-auth, api-catalogue]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -24,5 +26,5 @@ jobs:
           context: api-auth
           push: true
           tags: |
-            ghcr.io/loic-only-one/videotheque-auth:${{ github.sha }}
-            ghcr.io/loic-only-one/videotheque-auth:latest
+            ghcr.io/loic-only-one/videotheque-${{ matrix.api }}:${{ github.sha }}
+            ghcr.io/loic-only-one/videotheque-${{ matrix.api }}:latest
