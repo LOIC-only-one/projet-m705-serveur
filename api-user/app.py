@@ -8,14 +8,11 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from flask import jsonify
 from flask_jwt_extended import (
     JWTManager,
-    create_access_token,
-    create_refresh_token,
+    verify_jwt_in_request,
     get_jti,
     get_jwt,
     get_jwt_identity,
-    jwt_required,
-    set_refresh_cookies,
-    unset_refresh_cookies,
+    jwt_required
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -24,10 +21,10 @@ from mongoengine.connection import get_db
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 #from errors import init_errors
-from models import Utilisateur
-#from schemas import LoginIn, RegisterIn, UserOut
+from models import Utilisateur, RefreshToken
+from schemas import UserOut, UserIdsout, UserPatchIn
 
-#### Définition de ;l'application Flask
+#### Définition de l'application Flask
 app = APIFlask(__name__,title="api-auth",docs_path="/api/auth/docs",spec_path="/api/auth/openapi.json",)
 app.config.from_object("config")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
@@ -43,9 +40,39 @@ init_errors(app, jwt)
 #### Fonctions utilitaires
 """
 Endpoints :
-@app.get("/health") : vérifie que la base de données est prête.
-@app.post("/api/auth/register") : crée un compte.
-@app.post("/api/auth/login") : vérifie email et mot de passe, renvoie le jeton d'accès et pose le cookie de rafraîchissement.
-@app.post("/api/auth/refresh") : échange le cookie de rafraîchissement contre un nouveau couple de jetons (rotation).
-@app.post("/api/auth/logout") : révoque le jeton de rafraîchissement et efface le cookie.
+@app.get("/users") : Renvoie tous les ID des utilisateurs
+@app.get("/users/{id}") : Renvoie tous les champs d'un user spécifique
+@app.patch("/users/{id}") : Modifie certains éléments d'un user
+@app.delete("/users/{id}") : Supprime un user.
 """
+
+def checkAuthToken():
+    """Vérifie que le refresh token du cookie existe en base. Retourne le document ou None."""
+    try:
+        verify_jwt_in_request(refresh=True)  # signature + expiration + type "refresh"
+    except Exception:
+        return None
+    return RefreshToken.objects(
+        jti=get_jwt()["jti"],
+        utilisateur=ObjectId(get_jwt_identity()),
+    ).first()
+
+
+def isAdmin():
+    return get_jwt().get("role") == "admin"
+
+
+def verifier_acces(id):
+    """Autorise l'admin ou le propriétaire du compte."""
+    if not (isAdmin() or get_jwt_identity() == id):
+        abort(403, "Accès refusé")
+
+
+def trouver_user(id):
+    if not ObjectId.is_valid(id):
+        abort(404, "Utilisateur introuvable")
+    user = Utilisateur.objects(id=id).first()
+    if user is None:
+        abort(404, "Utilisateur introuvable")
+    return user
+
