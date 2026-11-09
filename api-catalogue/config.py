@@ -3,7 +3,6 @@
 ## Comparatif avec django il s'agit d'un équivalent de settings.py, mais pour Flask
 
 import os
-from datetime import timedelta
 from urllib.parse import quote_plus
 
 
@@ -21,20 +20,13 @@ MONGODB_URI = "mongodb://{user}:{password}@{host}:{port}/{db}".format(
     port=os.environ.get("DB_PORT", "27017"),
     db=os.environ.get("DB_NAME", "videotheque"),
 )
-VALIDATION_ERROR_STATUS_CODE = 400 # Permet de renvoyer un code 400 (Bad Request) au lieu de 422 (Unprocessable Entity) pour les erreurs de validation des entrées. Cela est plus conforme aux bonnes pratiques REST.
+VALIDATION_ERROR_STATUS_CODE = 400  # 400 (Bad Request) au lieu de 422 pour les erreurs de validation des entrées
 
-# Jetons JWT signés en RS256 : la clé privée n'existe que dans api-auth
+# api-catalogue ne fait que VÉRIFIER les jetons d'accès émis par api-auth :
+# seule la clé publique est montée ici, la clé privée reste dans api-auth.
 JWT_ALGORITHM = "RS256"
-JWT_PRIVATE_KEY = read_secret("JWT_PRIVATE_KEY")
 JWT_PUBLIC_KEY = read_secret("JWT_PUBLIC_KEY")
-JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=15)
-JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
 
-# Jeton de rafraîchissement dans un cookie HttpOnly, envoyé seulement à /api/auth
-JWT_TOKEN_LOCATION = ["cookies"]
-JWT_REFRESH_COOKIE_NAME = "refresh_token"
-JWT_REFRESH_COOKIE_PATH = "/api/auth"
-JWT_SESSION_COOKIE = False
-JWT_COOKIE_SECURE = True
-JWT_COOKIE_SAMESITE = "Strict"
-JWT_COOKIE_CSRF_PROTECT = False
+# Le jeton d'accès arrive dans l'en-tête "Authorization: Bearer <jeton>".
+# Le cookie de rafraîchissement n'est jamais envoyé ici (Path=/api/auth).
+JWT_TOKEN_LOCATION = ["headers"]

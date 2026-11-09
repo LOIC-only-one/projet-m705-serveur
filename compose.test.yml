@@ -3,6 +3,7 @@
 #   Base seule (pour pytest)  : docker compose -f compose.test.yml up -d db-test
 #   Pile complète             : docker compose -f compose.test.yml up -d --build
 #   puis http://localhost:8080/api/auth/docs
+
 services:
   db-test:
     image: mongo:8.2
@@ -53,9 +54,19 @@ services:
     depends_on:
       - api-auth
       - front-index
+      - api-catalogue
+  api-catalogue:
+    build: ./api-catalogue
+    environment:
+      DB_HOST: db-test
+      DB_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    depends_on:
+      db-test:
+        condition: service_healthy
 
   # api-user:
-  # api-catalogue:
 
 secrets:
   db_password:
