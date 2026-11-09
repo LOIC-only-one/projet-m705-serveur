@@ -73,8 +73,10 @@ services:
     environment:
       DB_HOST: db-test
       DB_PASSWORD_FILE: /run/secrets/db_password
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
     secrets:
       - db_password
+      - jwt_public_key
     depends_on:
       db-test:
         condition: service_healthy
