@@ -69,11 +69,10 @@ def importer_catalogue():
 
     premiere_page = tmdb_get("movie/popular", language="fr-FR", page=1)
     total_pages = min(premiere_page.get("total_pages", 1), TMDB_MAX_PAGES)
-    pages = [premiere_page, *(
-        tmdb_get("movie/popular", language="fr-FR", page=page)
-        for page in range(2, total_pages + 1)
-    )]
-    for resultat in pages:
+    for page in range(1, total_pages + 1):
+        resultat = premiere_page if page == 1 else tmdb_get(
+            "movie/popular", language="fr-FR", page=page
+        )
         for f in resultat.get("results", []):
             annee = f.get("release_date", "")[:4]
             if not annee.isdigit() or int(annee) < 1888:
@@ -86,8 +85,6 @@ def importer_catalogue():
                 set__genres=[genres[i] for i in f.get("genre_ids", []) if i in genres],
                 upsert=True,
             )
-            film = Film.objects(tmdb_id=f["id"]).first()
-            trouver_bande_annonce(film)
 
 
 #### Fonctions utilitaires
