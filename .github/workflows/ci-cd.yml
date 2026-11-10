@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        api: [api-auth, api-catalogue]
+        api: [api-auth, api-catalogue, api-user]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
