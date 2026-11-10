@@ -11,6 +11,8 @@ class FilmsQuery(Schema):
     """Paramètres de GET /api/films : q = recherche dans le titre, genre = nom exact d'un genre."""
     q = String(load_default="", validate=Length(max=100))
     genre = String(load_default="", validate=Length(max=50))
+    page = Integer(load_default=1, validate=Range(min=1))
+    per_page = Integer(load_default=20, validate=Range(min=1, max=100))
 
 
 class FilmIdIn(Schema):

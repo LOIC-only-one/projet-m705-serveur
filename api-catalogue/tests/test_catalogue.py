@@ -58,7 +58,11 @@ def auth(private_key):
 
 def disponibles(client, headers):
     films = client.get("/api/films?q=zzz film", headers=headers).json["films"]
-    return [f["disponibles"] for f in films if f["id"] == FILM_ID]
+    resultats = []
+    for film in films:
+        if film["id"] == FILM_ID:
+            resultats.append(film["disponibles"])
+    return resultats
 
 
 def test_sans_jeton_401(client):
@@ -109,6 +113,24 @@ def test_entrees_invalides(client, auth):
     assert client.delete("/api/exemplaires/pas-un-id", headers=auth("a")).status_code == 404
 
 
+def test_film_pas_empruntable_avant_son_annee_de_sortie(client, auth):
+    from models import Exemplaire, Film
+
+    film = Film(
+        tmdb_id=FILM_ID + 2,
+        titre="Zzz Film Futur",
+        annee=datetime.now().year + 1,
+    ).save()
+    Exemplaire(film=film, proprietaire_id="alice").save()
+    try:
+        reponse = emprunter(client, auth("bob"), film.tmdb_id)
+        assert reponse.status_code == 409
+        assert reponse.json["error"]["code"] == "FILM_NON_SORTI"
+    finally:
+        Exemplaire.objects(film=film).delete()
+        film.delete()
+
+
 def emprunter(client, headers, film_id=FILM_ID):
     return client.post("/api/emprunts", json={"film_id": film_id}, headers=headers)
 
@@ -154,7 +176,10 @@ def test_prolongation_et_retard(client, auth):
         client.post(f"/api/emprunts/{emp['id']}/retour", headers=bob)
         assert emprunter(client, bob, FILM_ID + 1).status_code == 201
         historique = client.get("/api/emprunts", headers=bob).json["emprunts"]
-        assert [e["date_retour"] is None for e in historique] == [True, False]  # en cours d'abord
+        retours = []
+        for emprunt in historique:
+            retours.append(emprunt["date_retour"] is None)
+        assert retours == [True, False]  # en cours d'abord
     finally:
         Emprunt.objects.delete()
         from models import Exemplaire
@@ -169,7 +194,10 @@ def test_filtre_genre(client, auth):
     try:
         Film.objects(tmdb_id=FILM_ID).update_one(push__genres=genre)
         reponse = client.get("/api/films?genre=Zzz Genre", headers=auth("a")).json
-        assert [f["id"] for f in reponse["films"]] == [FILM_ID]
+        identifiants = []
+        for film in reponse["films"]:
+            identifiants.append(film["id"])
+        assert identifiants == [FILM_ID]
         assert "Zzz Genre" in reponse["genres"]
         assert client.get("/api/films?genre=Inconnu", headers=auth("a")).json["films"] == []
     finally:

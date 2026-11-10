@@ -61,8 +61,12 @@ def nettoyer_donnees_catalogue(id):
     db = get_db()
     exemplaires = db["exemplaire"]
     emprunts = db["emprunt"]
-    proprietes = [ex["_id"] for ex in exemplaires.find({"proprietaire_id": id}, {"_id": 1})]
-    references = [DBRef("exemplaire", exemplaire_id) for exemplaire_id in proprietes]
+    proprietes = []
+    for exemplaire in exemplaires.find({"proprietaire_id": id}, {"_id": 1}):
+        proprietes.append(exemplaire["_id"])
+    references = []
+    for exemplaire_id in proprietes:
+        references.append(DBRef("exemplaire", exemplaire_id))
     emprunts.delete_many({"$or": [{"utilisateur_id": id}, {"exemplaire": {"$in": references}}]})
     exemplaires.update_many({"emprunteur_id": id}, {"$unset": {"emprunteur_id": ""}})
     exemplaires.delete_many({"proprietaire_id": id})

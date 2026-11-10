@@ -3,6 +3,8 @@
 ## Comparatif avec django il s'agit d'un équivalent de views.py, mais pour Flask
 
 from datetime import datetime, timedelta, timezone
+from math import ceil
+from threading import Lock, Thread
 
 import requests
 from apiflask import APIFlask, abort
@@ -20,6 +22,7 @@ TMDB_MAX_PAGES = 500  # limite maximale de pagination imposée par TMDB
 DUREE_EMPRUNT = timedelta(days=14)
 DUREE_PROLONGATION = timedelta(days=7)
 MAX_EMPRUNTS = 5
+importation_en_cours = Lock()
 
 #### Définition de l'application Flask
 app = APIFlask(__name__, title="api-catalogue", docs_path="/api/catalogue/docs", spec_path="/api/catalogue/openapi.json",)
@@ -61,18 +64,23 @@ def tmdb_get(path, **params):
     return response.json()
 
 
-def importer_catalogue():
-    """Copie toutes les pages de films populaires de TMDB dans la base."""
+def importer_catalogue(debut=1, fin=None):
+    """Importe une plage de pages TMDB et renvoie le nombre total de pages."""
     for g in tmdb_get("genre/movie/list", language="fr-FR").get("genres", []):
         Genre.objects(tmdb_id=g["id"]).update_one(set__nom=g["name"], upsert=True)
-    genres = {g.tmdb_id: g for g in Genre.objects}
+    genres = {}
+    for genre in Genre.objects:
+        genres[genre.tmdb_id] = genre
 
     premiere_page = tmdb_get("movie/popular", language="fr-FR", page=1)
     total_pages = min(premiere_page.get("total_pages", 1), TMDB_MAX_PAGES)
-    for page in range(1, total_pages + 1):
-        resultat = premiere_page if page == 1 else tmdb_get(
-            "movie/popular", language="fr-FR", page=page
-        )
+    fin = total_pages if fin is None else min(fin, total_pages)
+    pages = premiere_page if debut == 1 else None
+    for page in range(debut, fin + 1):
+        if page == 1:
+            resultat = pages
+        else:
+            resultat = tmdb_get("movie/popular", language="fr-FR", page=page)
         for f in resultat.get("results", []):
             annee = f.get("release_date", "")[:4]
             if not annee.isdigit() or int(annee) < 1888:
@@ -82,9 +90,40 @@ def importer_catalogue():
                 set__synopsis=f.get("overview", ""),
                 set__annee=int(annee),
                 set__affiche=f"https://image.tmdb.org/t/p/w500{f['poster_path']}" if f.get("poster_path") else None,
-                set__genres=[genres[i] for i in f.get("genre_ids", []) if i in genres],
+                set__genres=genres_du_film(f.get("genre_ids", []), genres),
                 upsert=True,
             )
+    return total_pages
+
+
+def genres_du_film(identifiants, genres):
+    resultat = []
+    for identifiant in identifiants:
+        if identifiant in genres:
+            resultat.append(genres[identifiant])
+    return resultat
+
+
+def importer_reste_catalogue(total_pages):
+    """Continue l'import complet sans bloquer la requête HTTP initiale."""
+    try:
+        importer_catalogue(debut=2, fin=total_pages)
+    except requests.RequestException:
+        app.logger.exception("Import TMDB interrompu")
+    finally:
+        importation_en_cours.release()
+
+
+def lancer_importation_catalogue():
+    """Importe une page immédiatement puis lance le reste une seule fois."""
+    if not importation_en_cours.acquire(blocking=False):
+        return
+    try:
+        total_pages = importer_catalogue(fin=1)
+    except Exception:
+        importation_en_cours.release()
+        raise
+    Thread(target=importer_reste_catalogue, args=(total_pages,), daemon=True).start()
 
 
 #### Fonctions utilitaires
@@ -120,15 +159,28 @@ def films_ou(champ, moi):
 def statut_films(moi):
     """Renvoie une fonction film -> données du film + statut pour moi (une seule série de requêtes pour toute la liste)."""
     libres = Exemplaire.objects(emprunteur_id=None, proprietaire_id__ne=moi)
-    disponibles = {r["_id"]: r["n"] for r in libres.aggregate([{"$group": {"_id": "$film", "n": {"$sum": 1}}}])}
+    disponibles = {}
+    groupes = libres.aggregate([{"$group": {"_id": "$film", "n": {"$sum": 1}}}])
+    for groupe in groupes:
+        disponibles[groupe["_id"]] = groupe["n"]
     possedes, empruntes = films_ou("proprietaire_id", moi), films_ou("emprunteur_id", moi)
-    return lambda f: {**film_json(f), "disponibles": disponibles.get(f.id, 0),
-                      "possede": f.id in possedes, "emprunte": f.id in empruntes}
+    def ajouter_statut(film):
+        resultat = film_json(film)
+        resultat["disponibles"] = disponibles.get(film.id, 0)
+        resultat["possede"] = film.id in possedes
+        resultat["emprunte"] = film.id in empruntes
+        return resultat
+
+    return ajouter_statut
 
 
 def film_json(film):
+    noms_genres = []
+    for genre in film.genres:
+        noms_genres.append(genre.nom)
     return {"id": film.tmdb_id, "titre": film.titre, "synopsis": film.synopsis, "annee": film.annee,
-            "affiche": film.affiche, "genres": [g.nom for g in film.genres]}
+            "affiche": film.affiche, "genres": noms_genres,
+            "empruntable": film.annee <= datetime.now(timezone.utc).year}
 
 
 def trouver_bande_annonce(film):
@@ -139,10 +191,10 @@ def trouver_bande_annonce(film):
         videos = tmdb_get(f"movie/{film.tmdb_id}/videos", language="fr-FR").get("results", [])
     except requests.RequestException:
         return None
-    candidates = [
-        video for video in videos
-        if video.get("site") == "YouTube" and video.get("type") == "Trailer"
-    ]
+    candidates = []
+    for video in videos:
+        if video.get("site") == "YouTube" and video.get("type") == "Trailer":
+            candidates.append(video)
     candidates.sort(key=lambda video: (
         not video.get("official", False),
         video.get("iso_639_1") != "fr",
@@ -179,7 +231,7 @@ def lister_films(query):
     """Catalogue filtré. "disponibles" = exemplaires d'autres utilisateurs non prêtés."""
     if Film.objects.count() == 0:
         try:
-            importer_catalogue()
+            lancer_importation_catalogue()
         except requests.RequestException:
             refuser("TMDB indisponible, catalogue vide.", "TMDB_INDISPONIBLE", 502)
 
@@ -187,9 +239,20 @@ def lister_films(query):
     if query["genre"]:
         genre = Genre.objects(nom=query["genre"]).first()
         films = films.filter(genres=genre) if genre else films.none()
+    total = films.count()
+    page = query["page"]
+    per_page = query["per_page"]
+    pages = ceil(total / per_page) if total else 0
     statut = statut_films(get_jwt_identity())
-    return {"films": [statut(f) for f in films.order_by("-annee", "titre")],
-            "genres": [g.nom for g in Genre.objects.order_by("nom")]}
+    films_page = films.order_by("-annee", "titre").skip((page - 1) * per_page).limit(per_page)
+    films_json = []
+    for film in films_page:
+        films_json.append(statut(film))
+    genres = []
+    for genre in Genre.objects.order_by("nom"):
+        genres.append(genre.nom)
+    return {"films": films_json, "genres": genres, "page": page,
+            "per_page": per_page, "total": total, "pages": pages}
 
 
 @app.get("/api/films/<int:tmdb_id>")
@@ -258,7 +321,12 @@ def mes_emprunts():
     moi = get_jwt_identity()
     en_cours = Emprunt.objects(utilisateur_id=moi, date_retour=None).order_by("date_retour_prevue")
     rendus = Emprunt.objects(utilisateur_id=moi, date_retour__ne=None).order_by("-date_retour")
-    return {"emprunts": [emprunt_json(e) for e in [*en_cours, *rendus]]}
+    resultats = []
+    for emprunt in en_cours:
+        resultats.append(emprunt_json(emprunt))
+    for emprunt in rendus:
+        resultats.append(emprunt_json(emprunt))
+    return {"emprunts": resultats}
 
 
 @app.post("/api/emprunts")
@@ -269,6 +337,12 @@ def emprunter(data):
     """Emprunte un exemplaire libre du film, appartenant à un autre utilisateur."""
     moi = get_jwt_identity()
     film = trouver_film(data["film_id"])
+    if film.annee > datetime.now(timezone.utc).year:
+        refuser(
+            "Ce film ne peut pas être emprunté avant son année de sortie.",
+            "FILM_NON_SORTI",
+            409,
+        )
     if Exemplaire.objects(film=film, proprietaire_id=moi).first():
         refuser("Ce film est déjà dans votre vidéothèque.", "FILM_DEJA_POSSEDE", 409)
     # shortcut: ces vérifications puis la réservation ne sont pas atomiques ensemble ; deux requêtes simultanées

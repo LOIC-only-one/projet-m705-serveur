@@ -163,7 +163,9 @@ def test_logout_revoque_le_jeton(client):
 
 
 def test_login_limite_a_5_par_minute(client):
-    codes = [login(client, "x@y.fr", "n-importe-quoi").status_code for _ in range(6)]
+    codes = []
+    for _ in range(6):
+        codes.append(login(client, "x@y.fr", "n-importe-quoi").status_code)
     assert codes == [401] * 5 + [429]
 
 
