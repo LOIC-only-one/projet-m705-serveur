@@ -4,7 +4,8 @@
 
 from apiflask import APIFlask, abort
 from argon2 import PasswordHasher
-from bson import ObjectId
+from argon2.exceptions import InvalidHashError, VerificationError
+from bson import DBRef, ObjectId
 from flask_jwt_extended import JWTManager, get_jwt, get_jwt_identity, jwt_required
 from mongoengine import NotUniqueError, connect
 from mongoengine.connection import get_db
@@ -12,7 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from errors import init_errors
 from models import RefreshToken, Utilisateur
-from schemas import UserListOut, UserOut, UserPatchIn
+from schemas import PasswordChangeIn, UserDeleteIn, UserListOut, UserOut, UserPatchIn
 
 #### Définition de l'application Flask
 app = APIFlask(__name__, title="api-user", docs_path="/api/users/docs", spec_path="/api/users/openapi.json",)
@@ -53,6 +54,18 @@ def trouver_user(id):
     if user is None:
         abort(404, "Utilisateur introuvable.", extra_data={"code": "UTILISATEUR_INTROUVABLE"})
     return user
+
+
+def nettoyer_donnees_catalogue(id):
+    """Supprime les copies et emprunts liés à un utilisateur avant son compte."""
+    db = get_db()
+    exemplaires = db["exemplaire"]
+    emprunts = db["emprunt"]
+    proprietes = [ex["_id"] for ex in exemplaires.find({"proprietaire_id": id}, {"_id": 1})]
+    references = [DBRef("exemplaire", exemplaire_id) for exemplaire_id in proprietes]
+    emprunts.delete_many({"$or": [{"utilisateur_id": id}, {"exemplaire": {"$in": references}}]})
+    exemplaires.update_many({"emprunteur_id": id}, {"$unset": {"emprunteur_id": ""}})
+    exemplaires.delete_many({"proprietaire_id": id})
 
 
 @app.get("/health")
@@ -117,15 +130,39 @@ def modifier_user(id, data):
     return user
 
 
-@app.delete("/api/users/<id>")
+@app.post("/api/users/<id>/password")
 @jwt_required()
-@app.output({}, status_code=204)
+@app.input(PasswordChangeIn, arg_name="data")
 @app.doc(security="BearerAuth")
-def supprimer_user(id):
-    """Supprime un utilisateur et révoque ses jetons de rafraîchissement."""
+def changer_mot_de_passe(id, data):
+    """Change le mot de passe après vérification de l'ancien."""
     verifier_acces(id)
     user = trouver_user(id)
+    try:
+        ph.verify(user.password_hash, data["current_password"])
+    except (VerificationError, InvalidHashError):
+        abort(401, "Mot de passe incorrect.", extra_data={"code": "MOT_DE_PASSE_INCORRECT"})
+    user.password_hash = ph.hash(data["new_password"])
+    user.save()
+    return "", 204
+
+
+@app.delete("/api/users/<id>")
+@jwt_required()
+@app.input(UserDeleteIn, arg_name="data")
+@app.output({}, status_code=204)
+@app.doc(security="BearerAuth")
+def supprimer_user(id, data):
+    """Supprime un utilisateur, ses jetons et ses données de vidéothèque."""
+    verifier_acces(id)
+    user = trouver_user(id)
+    if not est_admin() and "current_password" in data:
+        try:
+            ph.verify(user.password_hash, data.get("current_password") or "")
+        except (VerificationError, InvalidHashError):
+            abort(401, "Mot de passe incorrect.", extra_data={"code": "MOT_DE_PASSE_INCORRECT"})
     RefreshToken.objects(utilisateur=user).delete()
+    nettoyer_donnees_catalogue(id)
     user.delete()
     return ""
 ### Fin des définitions des routes de l'API

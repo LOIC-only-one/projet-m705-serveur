@@ -45,3 +45,13 @@ class UserPatchIn(Schema):
     password = String(validate=Length(12, 1024), load_only=True)  # même règle qu'à l'inscription, haché dans la route
     photo_profil = String(allow_none=True)
     role = String(validate=OneOf(["user", "admin"]))  # réservé aux admins, vérifié dans la route
+
+
+class UserDeleteIn(Schema):
+    """Mot de passe requis lorsqu'un utilisateur supprime son propre compte."""
+    current_password = String(load_only=True, allow_none=True)
+
+
+class PasswordChangeIn(Schema):
+    current_password = String(required=True, load_only=True)
+    new_password = String(required=True, load_only=True, validate=Length(12, 1024))
