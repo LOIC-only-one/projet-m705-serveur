@@ -63,6 +63,7 @@ services:
       DB_HOST: db-test
       DB_PASSWORD_FILE: /run/secrets/db_password
       JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+      TMDB_API_KEY_FILE: /run/secrets/tmdb_api_key
     secrets:
       - db_password
       - jwt_public_key
@@ -99,4 +100,3 @@ secrets:
 networks:
   default:
     name: projet-m705-serveur_default
-

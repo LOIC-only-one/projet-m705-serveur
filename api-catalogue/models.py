@@ -6,6 +6,7 @@ from mongoengine import DENY, PULL, DateField, DateTimeField, Document, IntField
 
 class Genre(Document):
     meta = {"collection": "genre"}
+    tmdb_id = IntField(required=True, unique=True)
     nom = StringField(required=True, unique=True, max_length=50)
 
 
