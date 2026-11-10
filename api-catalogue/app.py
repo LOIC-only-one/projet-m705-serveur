@@ -16,7 +16,7 @@ from errors import init_errors
 from models import Emprunt, Exemplaire, Film, Genre
 from schemas import FilmIdIn, FilmsQuery
 
-TMDB_PAGES = 5  # pages de films populaires importées (20 films par page)
+TMDB_MAX_PAGES = 500  # limite maximale de pagination imposée par TMDB
 DUREE_EMPRUNT = timedelta(days=14)
 DUREE_PROLONGATION = timedelta(days=7)
 MAX_EMPRUNTS = 5
@@ -62,13 +62,19 @@ def tmdb_get(path, **params):
 
 
 def importer_catalogue():
-    """Copie les genres et les films populaires de TMDB dans la base (upsert : relançable sans doublons)."""
+    """Copie toutes les pages de films populaires de TMDB dans la base."""
     for g in tmdb_get("genre/movie/list", language="fr-FR").get("genres", []):
         Genre.objects(tmdb_id=g["id"]).update_one(set__nom=g["name"], upsert=True)
     genres = {g.tmdb_id: g for g in Genre.objects}
 
-    for page in range(1, TMDB_PAGES + 1):
-        for f in tmdb_get("movie/popular", language="fr-FR", page=page).get("results", []):
+    premiere_page = tmdb_get("movie/popular", language="fr-FR", page=1)
+    total_pages = min(premiere_page.get("total_pages", 1), TMDB_MAX_PAGES)
+    pages = [premiere_page, *(
+        tmdb_get("movie/popular", language="fr-FR", page=page)
+        for page in range(2, total_pages + 1)
+    )]
+    for resultat in pages:
+        for f in resultat.get("results", []):
             annee = f.get("release_date", "")[:4]
             if not annee.isdigit() or int(annee) < 1888:
                 continue
