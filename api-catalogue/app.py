@@ -118,6 +118,23 @@ def tmdb_genres():
     return {"status": "genres successfully fetched", "total_genres": Genre.objects.count()}
 
 
+@app.get("/api/films")
+@jwt_required()
+def films():
+    return {
+        "films": [
+            {
+                "id": film.tmdb_id,
+                "titre": film.titre,
+                "synopsis": film.synopsis,
+                "annee": film.annee,
+                "affiche": film.affiche,
+            }
+            for film in Film.objects.order_by("-annee", "titre")
+        ]
+    }
+
+
 @app.get("/api/tmdb/films")
 @jwt_required()
 def tmdb_films():
