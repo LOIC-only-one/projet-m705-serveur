@@ -1,0 +1,163 @@
+services:
+  db:
+    image: ghcr.io/loic-only-one/videotheque-mongodb:${MONGODB_TAG:-latest}
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/db_password
+      AUTH_DB_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - mongo_data:/data/db
+    configs:
+      - source: db_init_auth
+        target: /docker-entrypoint-initdb.d/0_auth.js
+    networks:
+      - data
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.videotheque.db == true
+      restart_policy:
+        condition: on-failure
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'mongosh --quiet -u root -p "$$(cat /run/secrets/db_password)" --authenticationDatabase admin --eval ''db.adminCommand("ping").ok''',
+        ]
+
+  api-auth:
+    image: ghcr.io/loic-only-one/videotheque-api-auth:${API_AUTH_TAG:-latest}
+    environment:
+      DB_HOST: db
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+    secrets:
+      - db_password
+      - jwt_private_key
+      - jwt_public_key
+    networks:
+      - backend
+      - data
+    deploy:
+      replicas: 2
+      update_config:
+        order: start-first
+      restart_policy:
+        condition: on-failure
+
+  api-user:
+    image: ghcr.io/loic-only-one/videotheque-api-user:${API_USER_TAG:-latest}
+    environment:
+      DB_HOST: db
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+    secrets:
+      - db_password
+      - jwt_public_key
+    networks:
+      - backend
+      - data
+    deploy:
+      replicas: 2
+      update_config:
+        order: start-first
+      restart_policy:
+        condition: on-failure
+
+  api-catalogue:
+    image: ghcr.io/loic-only-one/videotheque-api-catalogue:${API_CATALOGUE_TAG:-latest}
+    environment:
+      DB_HOST: db
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+      TMDB_API_KEY_FILE: /run/secrets/tmdb_api_key
+    secrets:
+      - db_password
+      - jwt_public_key
+      - tmdb_api_key
+    networks:
+      - backend
+      - data
+    deploy:
+      replicas: 2
+      update_config:
+        order: start-first
+      restart_policy:
+        condition: on-failure
+
+  front-index:
+    image: ghcr.io/loic-only-one/videotheque-front-index:${FRONT_INDEX_TAG:-latest}
+    environment:
+      API_AUTH_URL: http://api-auth:8000
+      API_USER_URL: http://api-user:8000
+      API_CATALOG_URL: http://api-catalogue:8000
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      update_config:
+        order: start-first
+      restart_policy:
+        condition: on-failure
+
+  caddy:
+    image: caddy:2.8.4
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS doit contenir le domaine de production}
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.videotheque.edge == true
+      restart_policy:
+        condition: on-failure
+
+configs:
+  caddyfile:
+    file: ./Caddyfile
+  db_init_auth:
+    file: ./db/init/0_auth.js
+
+secrets:
+  db_password:
+    external: true
+  jwt_private_key:
+    external: true
+  jwt_public_key:
+    external: true
+  tmdb_api_key:
+    external: true
+
+volumes:
+  mongo_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  backend:
+    driver: overlay
+    attachable: true
+  data:
+    driver: overlay
+    attachable: true
