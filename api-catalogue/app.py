@@ -15,6 +15,20 @@ from models import Emprunt, Exemplaire, Film, Genre
 ### Définitions des variables globales pour l'initialisation du catalogue
 MAX_PAGES = 5  # nombre de pages de films à récupérer depuis l'API
 
+
+def tmdb_get(path, tmdb_api_key, **params):
+    """Interroge TMDB avec un token v4 ou une clé API v3."""
+    import requests
+
+    token = tmdb_api_key.strip()
+    url = f"https://api.themoviedb.org/3/{path}"
+    if token.lower().startswith("bearer "):
+        response = requests.get(url, headers={"Authorization": token}, params=params, timeout=10)
+    else:
+        response = requests.get(url, params={"api_key": token, **params}, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
 #### Définition de l'application Flask
 app = APIFlask(__name__, title="api-catalogue", docs_path="/api/catalogue/docs", spec_path="/api/catalogue/openapi.json",)
 app.config.from_object("config")
@@ -45,12 +59,7 @@ def verifier_acces(id):
 
 def fetch_tmdb_genres(tmdb_api_key):
     """Récupère la liste des genres depuis l'API TMDB et les stocke dans la base MongoDB."""
-    import requests
-
-    url = f"https://api.themoviedb.org/3/genre/movie/list?api_key={tmdb_api_key}&language=fr-FR"
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    genres_data = response.json().get("genres", [])
+    genres_data = tmdb_get("genre/movie/list", tmdb_api_key, language="fr-FR").get("genres", [])
     for genre_data in genres_data:
         Genre.objects(tmdb_id=genre_data["id"]).update_one(
             set__tmdb_id=genre_data["id"],
@@ -60,14 +69,8 @@ def fetch_tmdb_genres(tmdb_api_key):
 
 def fetch_tmdb_films(tmdb_api_key, page=1):
     """Récupère la liste des films depuis l'API TMDB et les stocke dans la base MongoDB."""
-    import requests
-
-    url = f"https://api.themoviedb.org/3/movie/popular?api_key={tmdb_api_key}&language=fr-FR&page={page}"
-
     ## Traitement des données du catalogue : on ne stocke que les champs pertinents dans la base MongoDB de api-catalogue.
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    films_data = response.json().get("results", [])
+    films_data = tmdb_get("movie/popular", tmdb_api_key, language="fr-FR", page=page).get("results", [])
 
     ## On stocke les films dans la base MongoDB de api-catalogue, en créant les genres si nécessaire.
     for film_data in films_data:
@@ -99,12 +102,7 @@ def initialize_catalog(tmdb_api_key):
 
 def statistic(tmdb_api_key):
     """Récupère les statistiques du catalogue depuis l'API TMDB."""
-    import requests
-
-    url = f"https://api.themoviedb.org/3/movie/popular?api_key={tmdb_api_key}&language=fr-FR&page=1"
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    films_data = response.json().get("results", [])
+    films_data = tmdb_get("movie/popular", tmdb_api_key, language="fr-FR", page=1).get("results", [])
     return {
         "total_films": len(films_data),
         "total_genres": Genre.objects.count(),

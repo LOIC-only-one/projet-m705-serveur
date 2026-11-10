@@ -38,7 +38,7 @@
         reverse_proxy api-user:8000
     }
 
-    @catalogue path /api/films* /api/exemplaires* /api/emprunts* /api/genres* /api/tmdb*
+    @catalogue path /api/catalogue/docs /api/catalogue/openapi.json /api/catalogue/* /api/films* /api/exemplaires* /api/emprunts* /api/genres* /api/tmdb*
     handle @catalogue {
         reverse_proxy api-catalogue:8000
     }
