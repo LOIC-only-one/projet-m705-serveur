@@ -157,9 +157,33 @@ def test_patch_role_inchange_accepte_pour_un_user(client, auth):
     assert resp.json["username"] == "nouveau"
 
 
+def test_patch_mot_de_passe_hache_en_argon2_et_jamais_renvoye(client, auth):
+    from argon2 import PasswordHasher
+    from models import Utilisateur
+
+    user = make_user()
+    resp = client.patch(
+        f"/api/users/{user.id}", headers=auth(user), json={"password": "nouveau-mot-de-passe"}
+    )
+    assert resp.status_code == 200
+    assert "password" not in resp.json and "password_hash" not in resp.json
+    stocke = Utilisateur.objects.get(id=user.id).password_hash
+    assert stocke.startswith("$argon2id$")
+    assert PasswordHasher().verify(stocke, "nouveau-mot-de-passe")
+
+
+def test_patch_mot_de_passe_d_un_autre_403_mais_admin_ok(client, auth):
+    user = make_user()
+    autre = make_user("autre")
+    admin = make_user("admin", role="admin")
+    body = {"password": "nouveau-mot-de-passe"}
+    assert client.patch(f"/api/users/{autre.id}", headers=auth(user), json=body).status_code == 403
+    assert client.patch(f"/api/users/{user.id}", headers=auth(admin), json=body).status_code == 200
+
+
 @pytest.mark.parametrize(
     "body",
-    [{}, {"password_hash": "x"}, {"username": "a"}, {"birthdate": "2999-01-01"}, {"email": "pas-un-mail"}],
+    [{}, {"password_hash": "x"}, {"password": "trop-court"}, {"password": "x" * 1025}, {"username": "a"}, {"birthdate": "2999-01-01"}, {"email": "pas-un-mail"}],
 )
 def test_patch_corps_invalide_400(client, auth, body):
     user = make_user()

@@ -35,5 +35,6 @@ class UserPatchIn(Schema):
     username = String(validate=Regexp(r"^[A-Za-z0-9_.-]{3,50}$"))
     email = Email(validate=Length(max=255))
     birthdate = Date(validate=date_passee)
+    password = String(validate=Length(12, 1024), load_only=True)  # même règle qu'à l'inscription, haché dans la route
     photo_profil = String(allow_none=True)
     role = String(validate=OneOf(["user", "admin"]))  # réservé aux admins, vérifié dans la route

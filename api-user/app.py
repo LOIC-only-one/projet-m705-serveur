@@ -3,6 +3,7 @@
 ## Comparatif avec django il s'agit d'un équivalent de views.py, mais pour Flask
 
 from apiflask import APIFlask, abort
+from argon2 import PasswordHasher
 from bson import ObjectId
 from flask_jwt_extended import JWTManager, get_jwt, get_jwt_identity, jwt_required
 from mongoengine import NotUniqueError, connect
@@ -20,6 +21,7 @@ app.security_schemes = {"BearerAuth": {"type": "http", "scheme": "bearer", "bear
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 connect(host=app.config["MONGODB_URI"])
 jwt = JWTManager(app)
+ph = PasswordHasher()  # argon2id, comme dans api-auth
 init_errors(app, jwt)
 #### Fin de la définition de l'application Flask
 
@@ -86,7 +88,7 @@ def obtenir_user(id):
 @app.output(UserOut)
 @app.doc(security="BearerAuth")
 def modifier_user(id, data):
-    """Modifie certains champs d'un utilisateur. Seul un admin peut changer le rôle."""
+    """Modifie certains champs d'un utilisateur (dont le mot de passe). Seul un admin peut changer le rôle."""
     verifier_acces(id)
     if not data:
         abort(400, "Aucun champ à modifier.", extra_data={"code": "CORPS_VIDE"})
@@ -95,6 +97,8 @@ def modifier_user(id, data):
     # Un non-admin peut renvoyer son rôle actuel (Swagger envoie tous les champs), pas le changer.
     if "role" in data and data["role"] != user.role and not est_admin():
         abort(403, "Seul un admin peut modifier le rôle.", extra_data={"code": "ACCES_REFUSE"})
+    if "password" in data:  # le mot de passe en clair n'est jamais stocké : seul son hash l'est
+        data["password_hash"] = ph.hash(data.pop("password"))
     if "email" in data:
         data["email"] = data["email"].lower()  # comme à l'inscription
     if "birthdate" in data:
