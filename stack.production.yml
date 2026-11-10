@@ -1,6 +1,6 @@
 services:
   db:
-    image: ghcr.io/loic-only-one/videotheque-mongodb:${MONGODB_TAG:-latest}
+    image: mongo:8.2
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/db_password
