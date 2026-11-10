@@ -80,6 +80,8 @@ def importer_catalogue():
                 set__genres=[genres[i] for i in f.get("genre_ids", []) if i in genres],
                 upsert=True,
             )
+            film = Film.objects(tmdb_id=f["id"]).first()
+            trouver_bande_annonce(film)
 
 
 #### Fonctions utilitaires
@@ -126,6 +128,29 @@ def film_json(film):
             "affiche": film.affiche, "genres": [g.nom for g in film.genres]}
 
 
+def trouver_bande_annonce(film):
+    """Récupère et mémorise la première bande-annonce YouTube officielle."""
+    if film.bande_annonce:
+        return film.bande_annonce
+    try:
+        videos = tmdb_get(f"movie/{film.tmdb_id}/videos", language="fr-FR").get("results", [])
+    except requests.RequestException:
+        return None
+    candidates = [
+        video for video in videos
+        if video.get("site") == "YouTube" and video.get("type") == "Trailer"
+    ]
+    candidates.sort(key=lambda video: (
+        not video.get("official", False),
+        video.get("iso_639_1") != "fr",
+    ))
+    if not candidates:
+        return None
+    film.bande_annonce = f"https://www.youtube.com/embed/{candidates[0]['key']}"
+    film.save()
+    return film.bande_annonce
+
+
 def emprunt_json(emprunt):
     aujourdhui = datetime.now(timezone.utc).date()
     return {"id": str(emprunt.id), "film": film_json(emprunt.exemplaire.film),
@@ -169,7 +194,10 @@ def lister_films(query):
 @app.doc(security="BearerAuth")
 def obtenir_film(tmdb_id):
     """Fiche d'un film, avec son statut pour moi."""
-    return statut_films(get_jwt_identity())(trouver_film(tmdb_id))
+    film = trouver_film(tmdb_id)
+    resultat = statut_films(get_jwt_identity())(film)
+    resultat["bande_annonce"] = trouver_bande_annonce(film)
+    return resultat
 
 
 @app.get("/api/exemplaires")

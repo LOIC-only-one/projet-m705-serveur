@@ -20,6 +20,7 @@ class Film(Document):  # Document = une collection MongoDB (équivalent d'une ta
     synopsis = StringField()
     annee = IntField(required=True, min_value=1888)
     affiche = StringField()  # URL de l'affiche
+    bande_annonce = StringField()  # URL d'intégration YouTube
     genres = ListField(ReferenceField(Genre, reverse_delete_rule=PULL))
 
 
