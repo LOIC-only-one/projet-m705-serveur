@@ -1,8 +1,11 @@
 """Collections MongoDB utilisées par api-catalogue (index uniques créés par MongoEngine au premier accès)."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from mongoengine import DENY, PULL, DateField, DateTimeField, Document, IntField, ListField, ReferenceField, StringField
+from mongoengine import CASCADE, PULL, BooleanField, DateField, DateTimeField, Document, IntField, ListField, ReferenceField, StringField
+
+# Les utilisateurs vivent dans la base d'api-auth : on stocke leur id (le "sub" du JWT), pas une référence.
+
 
 class Genre(Document):
     meta = {"collection": "genre"}
@@ -21,18 +24,22 @@ class Film(Document):  # Document = une collection MongoDB (équivalent d'une ta
 
 
 class Exemplaire(Document):
-    """Copie physique d'un film. Sa disponibilité se déduit des emprunts (date_retour vide = emprunté)."""
-    meta = {"collection": "exemplaire"}
-    film = ReferenceField(Film, required=True, reverse_delete_rule=DENY)
-    date_achat = DateField(required=True)
+    """Copie d'un film possédée par un utilisateur : son catalogue privé."""
+    # unique : un utilisateur déclare chaque film une seule fois (même en cas de double clic simultané)
+    meta = {"collection": "exemplaire", "indexes": [{"fields": ["proprietaire_id", "film"], "unique": True}, "film"]}
+    film = ReferenceField(Film, required=True)
+    proprietaire_id = StringField(required=True)
+    date_achat = DateField(default=date.today)
+    # Rempli pendant un emprunt : une mise à jour atomique de ce champ empêche deux emprunts simultanés.
+    emprunteur_id = StringField()
 
 
 class Emprunt(Document):
-    meta = {"collection": "emprunt"}
-    # DENY : on garde l'historique, impossible de supprimer un exemplaire déjà emprunté
-    exemplaire = ReferenceField(Exemplaire, required=True, reverse_delete_rule=DENY)
-    # L'utilisateur vit dans la base d'api-auth : on stocke son id (le "sub" du JWT), pas une référence
+    """Historique des emprunts (date_retour vide = en cours)."""
+    meta = {"collection": "emprunt", "indexes": ["utilisateur_id"]}
+    exemplaire = ReferenceField(Exemplaire, required=True, reverse_delete_rule=CASCADE)
     utilisateur_id = StringField(required=True)
     date_emprunt = DateTimeField(default=lambda: datetime.now(timezone.utc))
     date_retour_prevue = DateTimeField(required=True)
-    date_retour = DateTimeField()  # None tant que le film n'est pas rendu
+    date_retour = DateTimeField()
+    prolonge = BooleanField(default=False)  # une seule prolongation par emprunt
