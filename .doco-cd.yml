@@ -1,1 +1,4 @@
-name: serveur
+name: projet-m705
+reference: main
+compose_files:
+  - stack.production.yml
