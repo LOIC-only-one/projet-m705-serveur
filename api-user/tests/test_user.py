@@ -94,7 +94,11 @@ def test_liste_reservee_aux_admins(client, auth):
     assert client.get("/api/users", headers=auth(user)).status_code == 403
     resp = client.get("/api/users", headers=auth(admin))
     assert resp.status_code == 200
-    assert sorted(resp.json["ids"]) == sorted([str(user.id), str(admin.id)])
+    # id, username et email seulement, triés par nom : ni rôle, ni password_hash, ni date de naissance
+    assert resp.json == {"users": [
+        {"id": str(admin.id), "username": "admin", "email": "admin@b.fr"},
+        {"id": str(user.id), "username": "dupont", "email": "dupont@b.fr"},
+    ]}
 
 
 def test_get_proprietaire_ok_sans_password_hash(client, auth):

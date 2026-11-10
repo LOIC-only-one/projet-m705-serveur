@@ -5,7 +5,7 @@
 
 from datetime import date
 from apiflask import Schema
-from apiflask.fields import Date, DateTime, Email, List, String
+from apiflask.fields import Date, DateTime, Email, List, Nested, String
 from apiflask.validators import Length, OneOf, Regexp
 from marshmallow import ValidationError
 
@@ -25,9 +25,16 @@ class UserOut(Schema):
     created_at = DateTime()
 
 
-class UserIdsOut(Schema):
+class UserSummaryOut(Schema):
+    """Un utilisateur dans la liste : juste de quoi l'identifier (le détail est dans GET /api/users/<id>)."""
+    id = String()
+    username = String()
+    email = String()
+
+
+class UserListOut(Schema):
     """Corps renvoyé par GET /api/users."""
-    ids = List(String())
+    users = List(Nested(UserSummaryOut))
 
 
 class UserPatchIn(Schema):

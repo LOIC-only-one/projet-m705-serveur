@@ -12,7 +12,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from errors import init_errors
 from models import RefreshToken, Utilisateur
-from schemas import UserIdsOut, UserOut, UserPatchIn
+from schemas import UserListOut, UserOut, UserPatchIn
 
 #### Définition de l'application Flask
 app = APIFlask(__name__, title="api-user", docs_path="/api/users/docs", spec_path="/api/users/openapi.json",)
@@ -30,7 +30,7 @@ init_errors(app, jwt)
 """
 Endpoints :
 @app.get("/health") : vérifie que la base de données est prête.
-@app.get("/api/users") : renvoie tous les ID des utilisateurs (admin).
+@app.get("/api/users") : renvoie la liste des utilisateurs, avec id, username et email (admin).
 @app.get("/api/users/<id>") : renvoie tous les champs d'un utilisateur (admin ou propriétaire).
 @app.patch("/api/users/<id>") : modifie certains champs d'un utilisateur (admin ou propriétaire).
 @app.delete("/api/users/<id>") : supprime un utilisateur et révoque ses jetons (admin ou propriétaire).
@@ -63,13 +63,14 @@ def health():
 
 @app.get("/api/users")
 @jwt_required()  # sous la route et avant la validation : l'authentification passe en premier
-@app.output(UserIdsOut)
+@app.output(UserListOut)
 @app.doc(security="BearerAuth")
 def lister_users():
-    """Renvoie tous les ID des utilisateurs (admin uniquement)."""
+    """Renvoie la liste des utilisateurs, avec id, username et email (admin uniquement)."""
     if not est_admin():
         abort(403, "Accès refusé.", extra_data={"code": "ACCES_REFUSE"})
-    return {"ids": [str(u.id) for u in Utilisateur.objects.only("id")]}
+    # only() : MongoDB ne renvoie que ces champs (l'id est toujours inclus) ; tri par nom, ordre stable
+    return {"users": list(Utilisateur.objects.only("username", "email").order_by("username"))}
 
 
 @app.get("/api/users/<id>")
