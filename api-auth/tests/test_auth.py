@@ -36,8 +36,7 @@ def client(keys):
     limiter.reset()
     RefreshToken.objects.delete()
     Utilisateur.objects.delete()
-    # use_cookies=False : on passe le cookie à la main pour contrôler ce qui est envoyé.
-    return app.test_client(use_cookies=False)
+    return app.test_client()
 
 
 VALID = {
@@ -56,12 +55,8 @@ def login(client, email="a@b.fr", password="motdepasse-solide"):
     return client.post("/api/auth/login", json={"email": email, "password": password})
 
 
-def cookie_of(resp):
-    return resp.headers["Set-Cookie"].split(";")[0].split("=", 1)[1]
-
-
-def with_cookie(token):
-    return {"Cookie": f"refresh_token={token}"}
+def bearer(token):
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_health(client):
@@ -111,7 +106,7 @@ def test_register_sans_json_400(client):
     assert client.post("/api/auth/register", data="x").status_code == 400
 
 
-def test_login_emet_jwt_rs256_et_cookie_securise(client, keys):
+def test_login_emet_deux_jwt_rs256(client, keys):
     user_id = register(client).json["id"]
     resp = login(client, email="A@b.fr")
     assert resp.status_code == 200
@@ -120,9 +115,7 @@ def test_login_emet_jwt_rs256_et_cookie_securise(client, keys):
     assert claims["role"] == "user"
     assert claims["date_naissance"] == "2010-05-14"
     assert claims["exp"] - claims["iat"] == 15 * 60
-    cookie = resp.headers["Set-Cookie"]
-    for flag in ("HttpOnly", "Secure", "SameSite=Strict", "Path=/api/auth"):
-        assert flag in cookie
+    assert jwt.decode(resp.json["refresh_token"], keys, algorithms=["RS256"])["type"] == "refresh"
 
 
 @pytest.mark.parametrize(
@@ -138,28 +131,30 @@ def test_login_refuse_meme_erreur(client, email, password):
 
 def test_refresh_fait_tourner_le_jeton(client, keys):
     register(client)
-    old = cookie_of(login(client))
-    resp = client.post("/api/auth/refresh", headers=with_cookie(old))
+    old = login(client).json["refresh_token"]
+    resp = client.post("/api/auth/refresh", headers=bearer(old))
     assert resp.status_code == 200
     jwt.decode(resp.json["access_token"], keys, algorithms=["RS256"])
-    assert cookie_of(resp) != old
+    assert resp.json["refresh_token"] != old
     # L'ancien jeton a été consommé : le rejouer échoue.
-    assert client.post("/api/auth/refresh", headers=with_cookie(old)).status_code == 401
+    assert client.post("/api/auth/refresh", headers=bearer(old)).status_code == 401
 
 
-def test_refresh_sans_cookie_401(client):
+def test_refresh_refuse_un_access_token(client):
+    register(client)
+    access = login(client).json["access_token"]
+    assert client.post("/api/auth/refresh", headers=bearer(access)).status_code == 401
+
+
+def test_refresh_sans_jeton_401(client):
     assert client.post("/api/auth/refresh").status_code == 401
 
 
 def test_logout_revoque_le_jeton(client):
     register(client)
-    token = cookie_of(login(client))
-    resp = client.post("/api/auth/logout", headers=with_cookie(token))
-    assert resp.status_code == 204
-    assert "refresh_token=;" in resp.headers["Set-Cookie"]
-    assert (
-        client.post("/api/auth/refresh", headers=with_cookie(token)).status_code == 401
-    )
+    token = login(client).json["refresh_token"]
+    assert client.post("/api/auth/logout", headers=bearer(token)).status_code == 204
+    assert client.post("/api/auth/refresh", headers=bearer(token)).status_code == 401
 
 
 def test_login_limite_a_5_par_minute(client):

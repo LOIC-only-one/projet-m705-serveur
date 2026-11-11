@@ -28,9 +28,9 @@
 
 ## Jetons JWT (`app.py`, `config.py`, `errors.py`)
 
-- Options de Flask-JWT-Extended (RS256, durées de vie, cookies) :
+- Options de Flask-JWT-Extended (RS256, durées de vie) :
   https://flask-jwt-extended.readthedocs.io/en/stable/options.html
-- Jeton de rafraîchissement dans un cookie :
+- Emplacement des jetons (en-tête Authorization) :
   https://flask-jwt-extended.readthedocs.io/en/stable/token_locations.html
 - Renouvellement des jetons :
   https://flask-jwt-extended.readthedocs.io/en/stable/refreshing_tokens.html

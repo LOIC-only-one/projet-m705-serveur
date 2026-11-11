@@ -30,11 +30,5 @@ JWT_PUBLIC_KEY = read_secret("JWT_PUBLIC_KEY")
 JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=15)
 JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
 
-# Jeton de rafraîchissement dans un cookie HttpOnly, envoyé seulement à /api/auth
-JWT_TOKEN_LOCATION = ["cookies"]
-JWT_REFRESH_COOKIE_NAME = "refresh_token"
-JWT_REFRESH_COOKIE_PATH = "/api/auth"
-JWT_SESSION_COOKIE = False
-JWT_COOKIE_SECURE = True
-JWT_COOKIE_SAMESITE = "Strict"
-JWT_COOKIE_CSRF_PROTECT = False
+# Les deux jetons arrivent dans l'en-tête "Authorization: Bearer <jeton>"
+JWT_TOKEN_LOCATION = ["headers"]

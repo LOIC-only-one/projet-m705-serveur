@@ -28,7 +28,6 @@ JWT_ALGORITHM = "RS256"
 JWT_PUBLIC_KEY = read_secret("JWT_PUBLIC_KEY")
 
 # Le jeton d'accès arrive dans l'en-tête "Authorization: Bearer <jeton>".
-# Le cookie de rafraîchissement n'est jamais envoyé ici (Path=/api/auth).
 JWT_TOKEN_LOCATION = ["headers"]
 
 TMDB_API_KEY = read_secret("TMDB_API_KEY")
