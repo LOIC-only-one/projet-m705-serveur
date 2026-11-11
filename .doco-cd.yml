@@ -1,1 +1,6 @@
-name: serveur
+name: projet-m705
+reference: main
+compose_files:
+  - stack.production.yml
+environment:
+  SITE_ADDRESS: videotheque.quentin.pw

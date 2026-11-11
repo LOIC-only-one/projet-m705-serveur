@@ -1,6 +1,6 @@
 services:
   db:
-    image: ghcr.io/loic-only-one/videotheque-mongodb:${MONGODB_TAG:-latest}
+    image: mongo:8.2
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/db_password
@@ -47,7 +47,8 @@ services:
       update_config:
         order: start-first
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 5s
 
   api-user:
     image: ghcr.io/loic-only-one/videotheque-api-user:${API_USER_TAG:-latest}
@@ -66,7 +67,8 @@ services:
       update_config:
         order: start-first
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 5s
 
   api-catalogue:
     image: ghcr.io/loic-only-one/videotheque-api-catalogue:${API_CATALOGUE_TAG:-latest}
@@ -87,7 +89,8 @@ services:
       update_config:
         order: start-first
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 5s
 
   front-index:
     image: ghcr.io/loic-only-one/videotheque-front-index:${FRONT_INDEX_TAG:-latest}
