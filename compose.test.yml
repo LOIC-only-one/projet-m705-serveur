@@ -1,4 +1,4 @@
-# Pile de test : MongoDB jetable + api-auth + Caddy.
+# Pile de test : MongoDB jetable, les trois API, le front et Caddy.
 #   Clés et mot de passe de test (une seule fois) : ./secrets/generer.sh
 #   Base seule (pour pytest)  : docker compose -f compose.test.yml up -d db-test
 #   Pile complète             : docker compose -f compose.test.yml up -d --build
@@ -39,8 +39,6 @@ services:
 
   front-index:
     build: ../projet-m705-client/front-index/
-    ports:
-      - "127.0.0.1:3000:8000"
     depends_on:
       - api-auth
 
@@ -84,8 +82,6 @@ services:
     depends_on:
       db-test:
         condition: service_healthy
-      api-auth:
-        condition: service_started
 
 secrets:
   db_password:
@@ -96,7 +92,3 @@ secrets:
     file: ./secrets/jwt_public_key.pem
   tmdb_api_key:
     file: ./secrets/api-key.txt
-
-networks:
-  default:
-    name: projet-m705-serveur_default

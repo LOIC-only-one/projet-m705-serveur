@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.source=https://github.com/LOIC-only-one/api-auth
+LABEL org.opencontainers.image.source=https://github.com/LOIC-only-one/projet-m705-serveur
 
 WORKDIR /app
 
@@ -13,7 +13,6 @@ USER app
 
 EXPOSE 8000
 
-## Attente que la base de données soit prête avant de lancer l'application
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "app:app"]

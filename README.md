@@ -104,7 +104,7 @@ Tests (chaque API a son dossier `tests/`, exécutés avec pytest contre une base
 
 ```bash
 docker compose -f compose.test.yml up -d db-test
-cd api-auth && pip install -r requirements.txt pytest && pytest
+cd api-auth && pip install -r requirements.txt pytest && python -m pytest
 ```
 
 ## Déploiement
