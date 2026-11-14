@@ -1,0 +1,19 @@
+# doco-cd en mode polling : à lancer sur le manager Swarm (docker compose -f deploy/doco-cd.yml up -d).
+# Le polling ne demande aucun port ouvert : fonctionne derrière un NAT.
+services:
+  doco-cd:
+    image: ghcr.io/kimdre/doco-cd:0.133.2
+    container_name: doco-cd
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Paris
+      POLL_CONFIG: |
+        - url: https://github.com/LOIC-only-one/projet-m705-serveur.git
+          reference: main
+          interval: 2m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - data:/data
+
+volumes:
+  data:

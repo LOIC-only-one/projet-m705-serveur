@@ -113,7 +113,7 @@ cd api-auth && pip install -r requirements.txt pytest && pytest
 flowchart LR
     P[push sur main] --> GA[GitHub Actions<br/>build matrix ×4]
     GA -->|images :sha + :latest| GH[(GHCR)]
-    GH --> DC[doco-cd<br/>.doco-cd.yml]
+    GH -->|polling 2 min| DC[doco-cd<br/>.doco-cd.yml]
     DC -->|docker stack deploy| SW[Docker Swarm<br/>stack.production.yml]
 ```
 

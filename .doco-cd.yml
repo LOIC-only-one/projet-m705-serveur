@@ -1,6 +1,9 @@
-name: projet-m705
+name: videotheque
 reference: main
 compose_files:
   - stack.production.yml
+# Compare à chaque polling les digests des images avec GHCR : une nouvelle image
+# (de ce dépôt ou du front) est déployée sans commit sur ce dépôt.
+force_image_pull: true
 environment:
-  SITE_ADDRESS: videotheque.quentin.pw
+  SITE_ADDRESS: ":80" # lab sans domaine : HTTP sur l'IP du nœud edge. Mettre le domaine pour avoir HTTPS.

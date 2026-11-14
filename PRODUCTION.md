@@ -3,6 +3,14 @@
 Le fichier [stack.production.yml](./stack.production.yml) déploie MongoDB, les trois API,
 le front et Caddy sur un cluster Swarm.
 
+## Préparation des nœuds
+
+- Docker installé, l'utilisateur de déploiement dans le groupe `docker` (`sudo usermod -aG docker <user>`).
+- Un nom d'hôte unique par nœud (`sudo hostnamectl set-hostname …`) : des VM clonées gardent
+  le même nom, ce qui rend les étiquettes de nœud ambiguës.
+- Ports 80/443 libres sur le nœud edge : un Apache livré avec l'image système empêche Caddy
+  de démarrer (`sudo systemctl disable --now apache2`).
+
 ## Préparation du cluster
 
 Initialiser Swarm sur le nœud manager :
@@ -44,46 +52,38 @@ mot de passe choisi par l'exploitant, puis insérer l'utilisateur dans MongoDB
 avec un accès administrateur temporaire. Ne réutiliser ni le mot de passe `admin`
 du script de test ni son hash.
 
-## Images et déploiement
+## Déploiement continu (doco-cd)
 
-Les variables de déploiement sont regroupées dans
-[.env.production.example](./.env.production.example). Créer le fichier local
-`.env.production` et le garder hors du dépôt :
+[doco-cd](https://doco.cd) tourne sur le manager et interroge ce dépôt toutes les 2 minutes
+(polling : aucun port à ouvrir, fonctionne derrière un NAT). La configuration du déploiement est
+dans [.doco-cd.yml](./.doco-cd.yml) : nom du stack, fichier compose, `SITE_ADDRESS`.
 
 ```bash
-cp .env.production.example .env.production
-# Modifier .env.production avec le domaine et les tags réels.
-set -a
-. ./.env.production
-set +a
-docker stack deploy --with-registry-auth -c stack.production.yml videotheque
+git clone https://github.com/LOIC-only-one/projet-m705-serveur.git
+docker compose -f projet-m705-serveur/deploy/doco-cd.yml up -d
+docker logs -f doco-cd
 ```
 
-Les images `videotheque-*` doivent être publiées sur GHCR avant le déploiement.
-Utiliser de préférence des tags immuables correspondant aux commits de chaque dépôt.
+Il redéploie quand :
 
-Contrôler le déploiement :
+- un commit sur `main` modifie le stack ou sa configuration ;
+- une image `videotheque-*:latest` change sur GHCR (`force_image_pull`), y compris celle du
+  front publiée par le dépôt client. Un push sur l'un ou l'autre dépôt arrive donc en production
+  au plus 2 minutes après la fin de la CI.
+
+`SITE_ADDRESS` vaut `:80` (HTTP sur l'IP du nœud edge). Avec un domaine dont le DNS pointe vers le
+nœud edge, y mettre le domaine : Caddy obtient alors le certificat HTTPS automatiquement.
+
+## Déploiement manuel
+
+Sans doco-cd, depuis une copie du dépôt sur le manager :
 
 ```bash
+SITE_ADDRESS=:80 docker stack deploy --with-registry-auth -c stack.production.yml videotheque
 docker stack services videotheque
-docker stack ps videotheque
 ```
 
-Le DNS du domaine doit pointer vers le nœud edge et les ports TCP 80/443 doivent
-être ouverts. Caddy obtiendra alors automatiquement le certificat HTTPS.
-
-## Mise à jour
-
-Publier les nouvelles images avec un nouveau tag, puis relancer :
-
-````bash
-Modifier les tags dans `.env.production`, puis recharger le fichier :
-
-```bash
-set -a
-. ./.env.production
-set +a
-docker stack deploy --with-registry-auth -c stack.production.yml videotheque
-````
+Les tags d'image se choisissent avec `API_AUTH_TAG`, `API_USER_TAG`, `API_CATALOGUE_TAG` et
+`FRONT_INDEX_TAG` (défaut `latest`).
 
 Ne pas supprimer le volume `mongo_data` pendant une mise à jour.
