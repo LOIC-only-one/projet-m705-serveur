@@ -111,7 +111,7 @@ cd api-auth && pip install -r requirements.txt pytest && pytest
 
 ```mermaid
 flowchart LR
-    P[push sur main] --> GA[GitHub Actions<br/>build matrix ×4]
+    P[push sur main] --> GA[GitHub Actions<br/>build matrix ×3]
     GA -->|images :sha + :latest| GH[(GHCR)]
     GH -->|polling 2 min| DC[doco-cd<br/>.doco-cd.yml]
     DC -->|docker stack deploy| SW[Docker Swarm<br/>stack.production.yml]
